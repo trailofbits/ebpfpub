@@ -1,0 +1,6 @@
+[submodule "libraries/Catch2/src"]
+	path = libraries/Catch2/src
+	url = https://github.com/catchorg/Catch2.git
+[submodule "libraries/CLI11/src"]
+	path = libraries/CLI11/src
+	url = https://github.com/CLIUtils/CLI11
