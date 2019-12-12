@@ -1,7 +1,9 @@
 cmake_minimum_required(VERSION 3.15.5)
-project("ebpfpub")
 
 include(cmake/options.cmake)
+
+project("ebpfpub")
+
 include(cmake/clang-tidy.cmake)
 include(cmake/sanitizers.cmake)
 include(cmake/tests.cmake)
@@ -67,9 +69,46 @@ function(defineSettingsTargets)
   target_compile_features(ebpfpub_cxx_settings INTERFACE cxx_std_17)
   target_link_libraries(ebpfpub_cxx_settings INTERFACE ebpfpub_common_settings)
 
+  if(EBPFPUB_ENABLE_LIBCPP)
+    message(STATUS "ebpfpub - Enabling libc++")
+
+    target_compile_options(ebpfpub_cxx_settings INTERFACE
+      -stdlib=libc++
+    )
+
+    target_link_options(ebpfpub_cxx_settings INTERFACE
+      -stdlib=libc++
+    )
+
+    target_link_libraries(ebpfpub_cxx_settings INTERFACE
+      c++abi
+      rt
+    )
+  endif()
+
   add_library(ebpfpub_c_settings INTERFACE)
   target_link_libraries(ebpfpub_c_settings INTERFACE ebpfpub_common_settings)
 endfunction()
 
+function(configureCcache)
+  find_program(ccache_binary_path "ccache")
+
+  if("${ccache_binary_path}" STREQUAL "ccache_binary_path-NOTFOUND")
+    message(STATUS "ebpfpub - ccache was not found")
+
+  else()
+    set(ccache_dir "$ENV{CCACHE_DIR}")
+    if("${ccache_dir}" STREQUAL "")
+      set(ccache_dir "system default")
+    endif()
+
+    message(STATUS "ebpfpub - ccache enabled (path: ${ccache_dir})")
+
+    set(CMAKE_C_COMPILER_LAUNCHER "${ccache_binary_path}" PARENT_SCOPE)
+    set(CMAKE_CXX_COMPILER_LAUNCHER "${ccache_binary_path}" PARENT_SCOPE)
+  endif()
+endfunction()
+
+configureCcache()
 configureClangTidy()
 ebpfpubMain()

@@ -1,0 +1,78 @@
+name: Linux
+
+on: [push]
+
+jobs:
+  Ubuntu1804_LLVM9_Debug:
+    runs-on: ubuntu-18.04
+
+    steps:
+    - uses: actions/checkout@v1
+
+    - name: Update the cache (ccache)
+      uses: actions/cache@v1.0.3
+      with:
+        path: ccache
+        key: Ubuntu1804_LLVM9_Debug_ccache
+
+    - name: Update the cache (Downloads)
+      uses: actions/cache@v1.0.3
+      with:
+        path: downloads
+        key: Ubuntu1804_LLVM9_Debug_downloads
+
+    - name: Update the cache (git submodules)
+      uses: actions/cache@v1.0.3
+      with:
+        path: .git/modules
+        key: Ubuntu1804_LLVM9_Debug_gitsubmodules
+
+    - name: Create the build folders
+      run: mkdir -p ccache build install downloads
+
+    - name: Synchronize the submodules
+      run: git submodule sync --recursive
+
+    - name: Update the submodules
+      run: git submodule update --init --recursive
+
+    - name: Install the osquery-toolchain
+      id: osquery_toolchain_installer
+      run: |
+        if [ ! -f downloads/osquery-toolchain.tar.xz ] ; then
+          curl -L 'https://alessandrogar.io/downloads/osquery-toolchain-1.0.1.tar.xz' -o downloads/osquery-toolchain.tar.xz
+        fi
+
+        tar xf downloads/osquery-toolchain.tar.xz
+        echo ::set-output name=PATH::$(realpath osquery-toolchain)
+
+    - name: Install system dependencies
+      run: sudo apt-get install ccache ninja-build curl -y
+
+    - name: Install CMake
+      id: cmake_installer
+      run: |
+        if [ ! -f downloads/cmake.tar.gz ] ; then
+          curl -L 'https://github.com/Kitware/CMake/releases/download/v3.16.1/cmake-3.16.1-Linux-x86_64.tar.gz' -o downloads/cmake.tar.gz
+        fi
+
+        tar xzf downloads/cmake.tar.gz
+        echo ::set-output name=CMAKE_BINARY::$(realpath $(find cmake* -type d -name bin)/cmake)
+
+    - name: Configure the project
+      run: |
+        export CCACHE_DIR="$(realpath ccache)"
+        ( cd build && ${{ steps.cmake_installer.outputs.CMAKE_BINARY }} -G Ninja -DEBPFPUB_TOOLCHAIN_PATH:PATH=${{ steps.osquery_toolchain_installer.outputs.PATH }} -DCMAKE_BUILD_TYPE:STRING=Debug -DEBPFPUB_ENABLE_INSTALL:BOOL=true -DEBPFPUB_ENABLE_TESTS:BOOL=true -DEBPFPUB_ENABLE_SANITIZERS:BOOL=true ..)
+
+    - name: Build the project
+      run: |
+        export CCACHE_DIR="$(realpath ccache)"
+        ( cd build && ninja -v )
+
+    - name: Run the tests
+      run: ( cd build && ninja -v run_ebpfpub_tests )
+
+    - name: Install the project
+      run: |
+        export DESTDIR="$(realpath install)" &&
+        ( cd build && ninja -v install )

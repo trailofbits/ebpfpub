@@ -17,7 +17,23 @@ endif()
 option(EBPFPUB_ENABLE_TESTS "Set to ON to build the tests")
 option(EBPFPUB_ENABLE_INSTALL "Set to ON to generate the install directives")
 option(EBPFPUB_ENABLE_SANITIZERS "Set to ON to enable sanitizers. Only available when compiling with Clang")
-option(EBPFPUB_ENABLE_LIBCPP "Set to ON to enable libc++.")
+option(EBPFPUB_ENABLE_LIBCPP "Set to ON to enable libc++")
 
 option(EBPFPUB_ENABLE_CLANG_TIDY "Enables clang-tidy support")
 set(EBPFPUB_CLANG_TIDY_CHECKS "-checks=cert-*,cppcoreguidelines-*,performance-*,portability-*,readability-*,modernize-*" CACHE STRING "List of checks performed by clang-tidy")
+
+set(EBPFPUB_TOOLCHAIN_PATH "" CACHE PATH "Toolchain path")
+
+if(NOT "${EBPFPUB_TOOLCHAIN_PATH}" STREQUAL "")
+  if(NOT EXISTS "${EBPFPUB_TOOLCHAIN_PATH}")
+    message(FATAL_ERROR "ebpfpub - The specified toolchain path is not valid: ${EBPFPUB_TOOLCHAIN_PATH}")
+  endif()
+
+  message(STATUS "ebpfpub - Using toolchain path '${EBPFPUB_TOOLCHAIN_PATH}'. Forcing EBPFPUB_ENABLE_LIBCPP to ON")
+
+  set(CMAKE_C_COMPILER "${EBPFPUB_TOOLCHAIN_PATH}/usr/bin/clang" CACHE PATH "Path to the C compiler" FORCE)
+  set(CMAKE_CXX_COMPILER "${EBPFPUB_TOOLCHAIN_PATH}/usr/bin/clang++" CACHE PATH "Path to the C++ compiler" FORCE)
+
+  set(CMAKE_SYSROOT "${EBPFPUB_TOOLCHAIN_PATH}" CACHE PATH "CMake sysroot for find_package scripts")
+  set(EBPFPUB_ENABLE_LIBCPP ON CACHE BOOL "Set to ON to enable libc++" FORCE)
+endif()

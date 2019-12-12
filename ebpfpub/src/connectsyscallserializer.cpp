@@ -1,6 +1,7 @@
 #include "connectsyscallserializer.h"
 
 #include <iomanip>
+#include <sstream>
 
 #include <netinet/in.h>
 #include <sys/un.h>

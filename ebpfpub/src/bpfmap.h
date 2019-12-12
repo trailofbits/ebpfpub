@@ -8,6 +8,7 @@
 #include <vector>
 
 #include <asm/unistd.h>
+#include <errno.h>
 #include <linux/bpf.h>
 #include <sys/sysinfo.h>
 #include <unistd.h>
