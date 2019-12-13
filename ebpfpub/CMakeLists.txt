@@ -81,6 +81,7 @@ function(ebpfpub)
   target_link_libraries(ebpfpub PUBLIC
     ebpfpub_cxx_settings
     thirdparty_llvm
+    thirdparty_libbpf
   )
 
   addTargetTest(

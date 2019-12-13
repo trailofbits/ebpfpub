@@ -4,3 +4,6 @@
 [submodule "libraries/CLI11/src"]
 	path = libraries/CLI11/src
 	url = https://github.com/CLIUtils/CLI11
+[submodule "libraries/libbpf/src"]
+	path = libraries/libbpf/src
+	url = https://github.com/libbpf/libbpf
