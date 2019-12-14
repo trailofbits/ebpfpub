@@ -42,6 +42,7 @@ Some of the above resources require the use of per-CPU maps, which perform the s
 * A recent Clang/LLVM installation (8.0 or better), compiled with BPF support
 * A recent libc++ or stdc++ library, supporting C++17
 * CMake
+* Linux kernel >= 4.18 (Ubuntu 18.10)
 
 Please note that LLVM itself must be compiled with libc++ when enabling the `EBPFPUB_ENABLE_LIBC++` option, since ebfpub will directly link against the LLVM libraries.
 
