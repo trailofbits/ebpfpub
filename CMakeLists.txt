@@ -27,7 +27,13 @@ function(ebpfpubMain)
 
   add_subdirectory("libraries")
   add_subdirectory("ebpfpub")
-  add_subdirectory("tools")
+
+  if(EBPFPUB_ENABLE_TOOLS)
+    message(STATUS "ebpfpub - Tools: enabled")
+    add_subdirectory("tools")
+  else()
+    message(STATUS "ebpfpub - Tools: disabled")
+  endif()
 endfunction()
 
 function(defineSettingsTargets)
