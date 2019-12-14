@@ -8,6 +8,7 @@
 
 cmake_minimum_required(VERSION 3.15.5)
 
+include(cmake/version.cmake)
 include(cmake/options.cmake)
 
 project("ebpfpub")
@@ -62,6 +63,9 @@ function(defineSettingsTargets)
     list(APPEND compile_definition_list NDEBUG)
   endif()
 
+  list(APPEND compile_definition_list
+    EBPFPUB_VERSION="${EBPFPUB_VERSION}"
+  )
 
   if("${CMAKE_BUILD_TYPE}" STREQUAL "Debug" OR "${CMAKE_BUILD_TYPE}" STREQUAL "RelWithDebInfo")
     list(APPEND compile_option_list -g3)

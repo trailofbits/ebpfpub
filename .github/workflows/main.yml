@@ -54,7 +54,7 @@ jobs:
         key: ${{ steps.cache_key.outputs.VALUE }}_gitsubmodules
 
     - name: Create the build folders
-      run: mkdir -p ccache build install downloads
+      run: mkdir -p ccache build install downloads package
 
     - name: Synchronize the submodules
       run: git submodule sync --recursive
@@ -88,7 +88,7 @@ jobs:
     - name: Configure the project
       run: |
         export CCACHE_DIR="$(realpath ccache)"
-        ( cd build && ${{ steps.cmake_installer.outputs.CMAKE_BINARY }} -G Ninja -DEBPFPUB_TOOLCHAIN_PATH:PATH=${{ steps.osquery_toolchain_installer.outputs.PATH }} -DCMAKE_BUILD_TYPE:STRING=${{ matrix.build_type }} -DEBPFPUB_ENABLE_INSTALL:BOOL=true -DEBPFPUB_ENABLE_TOOLS:BOOL=true -DEBPFPUB_ENABLE_TESTS:BOOL=true -DEBPFPUB_ENABLE_SANITIZERS:BOOL=true ..)
+        ( cd build && ${{ steps.cmake_installer.outputs.CMAKE_BINARY }} -G Ninja -DEBPFPUB_TOOLCHAIN_PATH:PATH=${{ steps.osquery_toolchain_installer.outputs.PATH }} -DCMAKE_BUILD_TYPE:STRING=${{ matrix.build_type }} -DEBPFPUB_ENABLE_INSTALL:BOOL=true -DEBPFPUB_ENABLE_TOOLS:BOOL=true -DEBPFPUB_ENABLE_TESTS:BOOL=true -DEBPFPUB_ENABLE_SANITIZERS:BOOL=true .. )
 
     - name: Build the project
       run: |
@@ -102,3 +102,11 @@ jobs:
       run: |
         export DESTDIR="$(realpath install)" &&
         ( cd build && ninja -v install )
+
+    - name: Configure the packaging project
+      run: |
+        export EBPFPUB_INSTALL_PATH="$(realpath install)" &&
+        ( cd package && ${{ steps.cmake_installer.outputs.CMAKE_BINARY }} -G Ninja -DEBPFPUB_INSTALL_PATH:PATH="${EBPFPUB_INSTALL_PATH}" ../package_generator )
+
+    - name: Build the package
+      run: ( cd package && ninja -v package )
