@@ -25,7 +25,10 @@ function(toolsEbpftracer)
     ebpfpub
     thirdparty_cli11
   )
-endfunction()
 
+  if(EBPFPUB_ENABLE_INSTALL)
+    install(TARGETS "ebpftracer" DESTINATION "bin")
+  endif()
+endfunction()
 
 toolsEbpftracer()
