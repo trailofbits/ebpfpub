@@ -26,6 +26,7 @@ option(EBPFPUB_ENABLE_TESTS "Set to ON to build the tests")
 option(EBPFPUB_ENABLE_INSTALL "Set to ON to generate the install directives")
 option(EBPFPUB_ENABLE_SANITIZERS "Set to ON to enable sanitizers. Only available when compiling with Clang")
 option(EBPFPUB_ENABLE_LIBCPP "Set to ON to enable libc++")
+option(EBPFPUB_ENABLE_TOOLS "Set to ON to enable tools")
 
 option(EBPFPUB_ENABLE_CLANG_TIDY "Enables clang-tidy support")
 set(EBPFPUB_CLANG_TIDY_CHECKS "-checks=cert-*,cppcoreguidelines-*,performance-*,portability-*,readability-*,modernize-*" CACHE STRING "List of checks performed by clang-tidy")
