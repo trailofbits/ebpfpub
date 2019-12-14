@@ -2,6 +2,10 @@
 
 ebpfpub is a Linux library that can be used to record system call activity. It works by generating eBPF programs that are then attached to the system tracepoints.
 
+| | |
+|-|-|
+| CI Status | ![](https://github.com/trailofbits/ebpfpub/workflows/Build/badge.svg) |
+
 ## How it works
 
 ### Tracepoint events
