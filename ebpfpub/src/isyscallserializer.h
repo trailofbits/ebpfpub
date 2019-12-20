@@ -13,7 +13,7 @@
 
 #include <ebpfpub/isyscalltracepoint.h>
 
-namespace ebpfpub {
+namespace tob::ebpfpub {
 class ISyscallSerializer {
 public:
   using Ref = std::unique_ptr<ISyscallSerializer>;
@@ -24,8 +24,9 @@ public:
 
   virtual const std::string &name() const = 0;
 
-  virtual SuccessOrStringError generate(const ITracepointEvent &enter_event,
-                                        BPFProgramWriter &bpf_prog_writer) = 0;
+  virtual SuccessOrStringError
+  generate(const ebpf::TracepointEvent &enter_event,
+           BPFProgramWriter &bpf_prog_writer) = 0;
 
   virtual SuccessOrStringError parseEvents(ISyscallTracepoint::Event &event,
                                            BufferReader &buffer_reader,
@@ -34,4 +35,4 @@ public:
   ISyscallSerializer(const ISyscallSerializer &) = delete;
   ISyscallSerializer &operator=(const ISyscallSerializer &) = delete;
 };
-} // namespace ebpfpub
+} // namespace tob::ebpfpub

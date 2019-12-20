@@ -4,9 +4,9 @@
 
 #include <CLI/CLI.hpp>
 
-#include <ebpfpub/error.h>
+#include <tob/error/error.h>
 
-namespace ebpfpub {
+namespace tob::ebpfpub {
 struct UserSettings final {
   bool verbose_flag{false};
   std::vector<std::string> tracepoint_list;
@@ -17,4 +17,4 @@ struct UserSettings final {
 };
 
 StringErrorOr<UserSettings> parseUserSettings(int argc, char *argv[]);
-} // namespace ebpfpub
+} // namespace tob::ebpfpub

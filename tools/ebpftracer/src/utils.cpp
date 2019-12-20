@@ -4,7 +4,7 @@
 
 #include <sys/resource.h>
 
-namespace ebpfpub {
+namespace tob::ebpfpub {
 void setRlimit() {
   struct rlimit rl = {};
   rl.rlim_max = RLIM_INFINITY;
@@ -15,4 +15,4 @@ void setRlimit() {
     throw std::runtime_error("Failed to set RLIMIT_MEMLOCK");
   }
 }
-} // namespace ebpfpub
+} // namespace tob::ebpfpub

@@ -8,12 +8,13 @@
 
 #pragma once
 
-#include "bpfmap.h"
 #include "bufferstorage.h"
 
-namespace ebpfpub {
-using EventMap = BPFMap<BPF_MAP_TYPE_HASH, std::uint64_t>;
-using StackMap = BPFMap<BPF_MAP_TYPE_PERCPU_ARRAY, std::uint32_t>;
+#include <tob/ebpf/bpfmap.h>
+
+namespace tob::ebpfpub {
+using EventMap = ebpf::BPFMap<BPF_MAP_TYPE_HASH, std::uint64_t>;
+using StackMap = ebpf::BPFMap<BPF_MAP_TYPE_PERCPU_ARRAY, std::uint32_t>;
 
 class BPFProgramResources final {
 public:
@@ -45,4 +46,4 @@ static_assert(
   "BPFProgramResources must be movable"
 );
 // clang-format on
-} // namespace ebpfpub
+} // namespace tob::ebpfpub

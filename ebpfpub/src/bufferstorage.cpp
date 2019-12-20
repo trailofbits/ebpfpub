@@ -7,17 +7,18 @@
 */
 
 #include "bufferstorage.h"
-#include "typedbpfmap.h"
 
 #include <sys/sysinfo.h>
 #include <unistd.h>
 
-namespace ebpfpub {
+#include <tob/ebpf/typedbpfmap.h>
+
+namespace tob::ebpfpub {
 namespace {
-using BufferMap = BPFMap<BPF_MAP_TYPE_PERCPU_ARRAY, std::uint32_t>;
+using BufferMap = ebpf::BPFMap<BPF_MAP_TYPE_PERCPU_ARRAY, std::uint32_t>;
 
 using IndexMap =
-    TypedBPFMap<BPF_MAP_TYPE_PERCPU_ARRAY, std::uint32_t, std::uint32_t>;
+    ebpf::TypedBPFMap<BPF_MAP_TYPE_PERCPU_ARRAY, std::uint32_t, std::uint32_t>;
 } // namespace
 
 struct BufferStorage::PrivateData final {
@@ -43,15 +44,15 @@ int BufferStorage::bufferMap() const { return d->buffer_map->fd(); }
 
 int BufferStorage::indexMap() const { return d->buffer_map->fd(); }
 
-BPFMapErrorCode BufferStorage::getBuffer(std::vector<std::uint8_t> &value,
-                                         std::uint64_t index) {
+ebpf::BPFMapErrorCode BufferStorage::getBuffer(std::vector<std::uint8_t> &value,
+                                               std::uint64_t index) {
 
   auto key = static_cast<std::uint32_t>(index & 0xFFFFFFFFULL);
   auto processor = static_cast<std::uint32_t>((index >> 48ULL) & 0xFFULL);
 
   auto processor_count = static_cast<std::size_t>(get_nprocs_conf());
   if (processor >= processor_count) {
-    return BPFMapErrorCode::Value::InvalidProcessorIndex;
+    return ebpf::BPFMapErrorCode::Value::InvalidProcessorIndex;
   }
 
   std::vector<std::uint8_t> buffer;
@@ -65,7 +66,7 @@ BPFMapErrorCode BufferStorage::getBuffer(std::vector<std::uint8_t> &value,
   value.resize(d->buffer_size);
   std::memcpy(value.data(), section_ptr, value.size());
 
-  return BPFMapErrorCode::Value::Success;
+  return ebpf::BPFMapErrorCode::Value::Success;
 }
 
 BufferStorage::BufferStorage(std::size_t buffer_size, std::size_t buffer_count)
@@ -104,4 +105,4 @@ IBufferStorage::create(std::size_t buffer_size, std::size_t buffer_count) {
     return error;
   }
 }
-} // namespace ebpfpub
+} // namespace tob::ebpfpub

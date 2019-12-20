@@ -1,5 +1,5 @@
 #pragma once
 
-namespace ebpfpub {
+namespace tob::ebpfpub {
 void setRlimit();
 }

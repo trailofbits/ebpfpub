@@ -1,3 +1,4 @@
 cmake_minimum_required(VERSION 3.16.1)
 
-add_subdirectory("ebpftracer")
+add_subdirectory("src")
+

@@ -8,16 +8,21 @@
 
 #include "perfeventreader.h"
 #include "bufferreader.h"
-#include "perfeventarray.h"
 #include "syscalltracepoint.h"
 
 #include <unordered_map>
 #include <vector>
 
-namespace ebpfpub {
+#include <tob/ebpf/perfeventarray.h>
+
+namespace tob::ebpfpub {
 struct PerfEventReader::PrivateData final {
-  IPerfEventArray::Ref perf_event_array;
-  IBufferStorage::Ref buffer_storage;
+  PrivateData(ebpf::PerfEventArray &perf_event_array_,
+              IBufferStorage &buffer_storage_)
+      : perf_event_array(perf_event_array_), buffer_storage(buffer_storage_) {}
+
+  ebpf::PerfEventArray &perf_event_array;
+  IBufferStorage &buffer_storage;
 
   std::unordered_map<std::uint32_t, ISyscallTracepoint::Ref>
       syscall_tracepoint_map;
@@ -35,8 +40,6 @@ void PerfEventReader::insert(ISyscallTracepoint::Ref syscall_tracepoint) {
 SuccessOrStringError
 PerfEventReader::exec(std::atomic_bool &terminate,
                       void (*callback)(const ISyscallTracepoint::EventList &)) {
-  auto &perf_event_array =
-      *static_cast<PerfEventArray *>(d->perf_event_array.get());
 
   for (auto &p : d->syscall_tracepoint_map) {
     auto &syscall_tracepoint_ref = p.second;
@@ -54,7 +57,7 @@ PerfEventReader::exec(std::atomic_bool &terminate,
 
   while (!terminate) {
     // Read the data from the perf event array
-    if (!perf_event_array.read(event_buffer)) {
+    if (!d->perf_event_array.read(event_buffer)) {
       continue;
     }
 
@@ -116,17 +119,13 @@ PerfEventReader::exec(std::atomic_bool &terminate,
   return {};
 }
 
-PerfEventReader::PerfEventReader(IPerfEventArray::Ref perf_event_array,
-                                 IBufferStorage::Ref buffer_storage)
-    : d(new PrivateData) {
-
-  d->perf_event_array = perf_event_array;
-  d->buffer_storage = buffer_storage;
-}
+PerfEventReader::PerfEventReader(ebpf::PerfEventArray &perf_event_array,
+                                 IBufferStorage &buffer_storage)
+    : d(new PrivateData(perf_event_array, buffer_storage)) {}
 
 StringErrorOr<PerfEventReader::Ref>
-IPerfEventReader::create(IPerfEventArray::Ref perf_event_array,
-                         IBufferStorage::Ref buffer_storage) {
+IPerfEventReader::create(ebpf::PerfEventArray &perf_event_array,
+                         IBufferStorage &buffer_storage) {
 
   try {
     return Ref(new PerfEventReader(perf_event_array, buffer_storage));
@@ -138,4 +137,4 @@ IPerfEventReader::create(IPerfEventArray::Ref perf_event_array,
     return error;
   }
 }
-} // namespace ebpfpub
+} // namespace tob::ebpfpub

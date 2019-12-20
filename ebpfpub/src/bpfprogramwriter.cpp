@@ -7,26 +7,56 @@
 */
 
 #include "bpfprogramwriter.h"
-#include "llvm_utils.h"
 
 #include <linux/bpf.h>
 
-namespace ebpfpub {
+#include <tob/ebpf/llvm_utils.h>
+
+namespace tob::ebpfpub {
 namespace {
-using EventMap = BPFMap<BPF_MAP_TYPE_HASH, std::uint64_t>;
-using StackMap = BPFMap<BPF_MAP_TYPE_PERCPU_ARRAY, std::uint32_t>;
+using EventMap = ebpf::BPFMap<BPF_MAP_TYPE_HASH, std::uint64_t>;
+using StackMap = ebpf::BPFMap<BPF_MAP_TYPE_PERCPU_ARRAY, std::uint32_t>;
 
 const std::string kEnterEventDataTypeName{"EnterEventData"};
 const std::string kExitEventDataTypeName{"ExitEventData"};
 const std::string kEventHeaderTypeName{"EventHeader"};
 const std::string kEvenDataTypeName{"EventData"};
 const std::string kEventEntryTypeName{"EventEntry"};
+
+StringErrorOr<llvm::Function *>
+createSyscallEventFunction(llvm::Module *llvm_module, const std::string &name,
+                           const std::string &parameter_type) {
+
+  auto function_argument = llvm_module->getTypeByName(parameter_type);
+  if (function_argument == nullptr) {
+    return StringError::create(
+        "The specified parameter type is not defined in the given module");
+  }
+
+  auto &llvm_context = llvm_module->getContext();
+
+  auto function_type =
+      llvm::FunctionType::get(llvm::Type::getInt64Ty(llvm_context),
+                              {function_argument->getPointerTo()}, false);
+
+  auto function_ptr = llvm::Function::Create(
+      function_type, llvm::Function::ExternalLinkage, name, llvm_module);
+
+  if (function_ptr == nullptr) {
+    return StringError::create("Failed to create the syscall event function");
+  }
+
+  function_ptr->setSection(name + "_section");
+  function_ptr->arg_begin()->setName("args");
+
+  return function_ptr;
+}
 } // namespace
 
 struct BPFProgramWriter::PrivateData final {
   PrivateData(llvm::Module &module_, BufferStorage &buffer_storage_,
-              const ITracepointEvent &enter_event_,
-              const ITracepointEvent &exit_event_)
+              const ebpf::TracepointEvent &enter_event_,
+              const ebpf::TracepointEvent &exit_event_)
       : module(module_), context(module_.getContext()), builder(context),
         buffer_storage(buffer_storage_), enter_event(enter_event_),
         exit_event(exit_event_) {}
@@ -38,16 +68,16 @@ struct BPFProgramWriter::PrivateData final {
 
   BufferStorage &buffer_storage;
 
-  const ITracepointEvent &enter_event;
-  const ITracepointEvent &exit_event;
+  const ebpf::TracepointEvent &enter_event;
+  const ebpf::TracepointEvent &exit_event;
 
   std::unordered_map<std::string, llvm::Value *> saved_value_map;
 };
 
 StringErrorOr<BPFProgramWriter::Ref>
 BPFProgramWriter::create(llvm::Module &module, BufferStorage &buffer_storage,
-                         const ITracepointEvent &enter_event,
-                         const ITracepointEvent &exit_event) {
+                         const ebpf::TracepointEvent &enter_event,
+                         const ebpf::TracepointEvent &exit_event) {
   try {
     return Ref(
         new BPFProgramWriter(module, buffer_storage, enter_event, exit_event));
@@ -131,7 +161,7 @@ BPFProgramWriter::initializeProgram(std::size_t event_map_size) {
   auto event_data_end_it = d->enter_event.structure().end();
 
   auto event_data_struct =
-      ITracepointEvent::Structure(event_data_start_it, event_data_end_it);
+      ebpf::TracepointEvent::Structure(event_data_start_it, event_data_end_it);
 
   type_exp =
       importTracepointEventStructure(event_data_struct, kEvenDataTypeName);
@@ -175,7 +205,7 @@ BPFProgramWriter::initializeProgram(std::size_t event_map_size) {
 
   // Now that we have defined the types, we can initialize the internal maps
   auto event_entry_type_size =
-      getLLVMStructureSize(event_entry_type, &module());
+      ebpf::getLLVMStructureSize(event_entry_type, &module());
 
   EventMap::Ref event_map;
   StackMap::Ref event_stack_map;
@@ -528,8 +558,8 @@ BPFProgramWriter::bpf_perf_event_output(int map_fd, std::uint64_t flags,
 
 BPFProgramWriter::BPFProgramWriter(llvm::Module &module,
                                    BufferStorage &buffer_storage,
-                                   const ITracepointEvent &enter_event,
-                                   const ITracepointEvent &exit_event)
+                                   const ebpf::TracepointEvent &enter_event,
+                                   const ebpf::TracepointEvent &exit_event)
     : d(new PrivateData(module, buffer_storage, enter_event, exit_event)) {}
 
 llvm::Function *BPFProgramWriter::getPseudoInstrinsic() {
@@ -577,7 +607,7 @@ llvm::Value *BPFProgramWriter::bpf_pseudo_map_fd(int fd) {
 }
 
 StringErrorOr<llvm::Type *> BPFProgramWriter::importTracepointEventType(
-    const ITracepointEvent::StructureField &structure_field) {
+    const ebpf::TracepointEvent::StructureField &structure_field) {
   llvm::Type *output{nullptr};
 
   if (structure_field.type.find('*') == std::string::npos) {
@@ -615,7 +645,8 @@ StringErrorOr<llvm::Type *> BPFProgramWriter::importTracepointEventType(
 
 StringErrorOr<llvm::StructType *>
 BPFProgramWriter::importTracepointEventStructure(
-    const ITracepointEvent::Structure &structure, const std::string &name) {
+    const ebpf::TracepointEvent::Structure &structure,
+    const std::string &name) {
 
   auto output = module().getTypeByName(name);
   if (output != nullptr) {
@@ -895,4 +926,4 @@ BPFProgramWriter::captureBuffer(llvm::Value *buffer_pointer,
 
   return {};
 }
-} // namespace ebpfpub
+} // namespace tob::ebpfpub

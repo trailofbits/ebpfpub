@@ -24,7 +24,7 @@ void signalHandler(int signal) {
 }
 
 void printEventHeader(
-    const ebpfpub::ISyscallTracepoint::Event::Header &header) {
+    const tob::ebpfpub::ISyscallTracepoint::Event::Header &header) {
   std::cout << "timestamp: " << header.timestamp << " ";
 
   std::cout << "process_id: " << header.process_id << " ";
@@ -38,7 +38,8 @@ void printEventHeader(
 }
 
 void printEventOptionalVariant(
-    const ebpfpub::ISyscallTracepoint::Event::OptionalVariant &opt_variant) {
+    const tob::ebpfpub::ISyscallTracepoint::Event::OptionalVariant
+        &opt_variant) {
   if (!opt_variant.has_value()) {
     std::cout << "<NULL>";
     return;
@@ -57,10 +58,10 @@ void printEventOptionalVariant(
     std::cout << "<buffer of " << value.size() << " bytes";
 
   } else if (std::holds_alternative<
-                 ebpfpub::ISyscallTracepoint::Event::Integer>(variant)) {
+                 tob::ebpfpub::ISyscallTracepoint::Event::Integer>(variant)) {
 
     const auto &integer =
-        std::get<ebpfpub::ISyscallTracepoint::Event::Integer>(variant);
+        std::get<tob::ebpfpub::ISyscallTracepoint::Event::Integer>(variant);
 
     if (integer.is_signed) {
       std::cout << static_cast<int>(integer.value);
@@ -73,7 +74,7 @@ void printEventOptionalVariant(
   }
 }
 
-void printEvent(const ebpfpub::ISyscallTracepoint::Event &event) {
+void printEvent(const tob::ebpfpub::ISyscallTracepoint::Event &event) {
   printEventHeader(event.header);
 
   std::cout << "syscall: " << event.syscall_name << " ";
@@ -92,14 +93,14 @@ void printEvent(const ebpfpub::ISyscallTracepoint::Event &event) {
 }
 
 int main(int argc, char *argv[]) {
-  ebpfpub::setRlimit();
+  tob::ebpfpub::setRlimit();
 
   signal(SIGINT, signalHandler);
 
-  ebpfpub::UserSettings user_settings;
+  tob::ebpfpub::UserSettings user_settings;
 
   {
-    auto user_settings_exp = ebpfpub::parseUserSettings(argc, argv);
+    auto user_settings_exp = tob::ebpfpub::parseUserSettings(argc, argv);
     if (!user_settings_exp.succeeded()) {
       std::cerr << user_settings_exp.error().message() << "\n";
       return 1;
@@ -108,10 +109,10 @@ int main(int argc, char *argv[]) {
     user_settings = user_settings_exp.takeValue();
   }
 
-  ebpfpub::IBufferStorage::Ref buffer_storage;
+  tob::ebpfpub::IBufferStorage::Ref buffer_storage;
 
   {
-    auto buffer_storage_exp = ebpfpub::IBufferStorage::create(
+    auto buffer_storage_exp = tob::ebpfpub::IBufferStorage::create(
         user_settings.buffer_size, user_settings.buffer_count);
 
     if (!buffer_storage_exp.succeeded()) {
@@ -128,11 +129,11 @@ int main(int argc, char *argv[]) {
   std::cout << " > Buffer storage: " << buffer_storage->memoryUsage()
             << " bytes\n";
 
-  ebpfpub::IPerfEventArray::Ref perf_event_array;
+  tob::ebpf::PerfEventArray::Ref perf_event_array;
 
   {
     auto perf_event_array_exp =
-        ebpfpub::IPerfEventArray::create(user_settings.perf_event_array_size);
+        tob::ebpf::PerfEventArray::create(user_settings.perf_event_array_size);
 
     if (!perf_event_array_exp.succeeded()) {
       const auto &error = perf_event_array_exp.error();
@@ -147,11 +148,11 @@ int main(int argc, char *argv[]) {
   std::cout << " > Perf output: " << perf_event_array->memoryUsage()
             << " bytes\n\n";
 
-  ebpfpub::IPerfEventReader::Ref perf_event_reader;
+  tob::ebpfpub::IPerfEventReader::Ref perf_event_reader;
 
   {
-    auto perf_event_reader_exp =
-        ebpfpub::IPerfEventReader::create(perf_event_array, buffer_storage);
+    auto perf_event_reader_exp = tob::ebpfpub::IPerfEventReader::create(
+        *perf_event_array.get(), *buffer_storage.get());
 
     if (!perf_event_reader_exp.succeeded()) {
       const auto &error = perf_event_reader_exp.error();
@@ -166,9 +167,9 @@ int main(int argc, char *argv[]) {
   std::cout << "Generating the BPF programs...\n\n";
 
   for (const auto &syscall_name : user_settings.tracepoint_list) {
-    ebpfpub::ISyscallTracepoint::Ref syscall_tracepoint = {};
-    auto syscall_tracepoint_exp = ebpfpub::ISyscallTracepoint::create(
-        syscall_name, buffer_storage, perf_event_array,
+    tob::ebpfpub::ISyscallTracepoint::Ref syscall_tracepoint = {};
+    auto syscall_tracepoint_exp = tob::ebpfpub::ISyscallTracepoint::create(
+        syscall_name, *buffer_storage.get(), *perf_event_array.get(),
         user_settings.event_map_size);
 
     if (!syscall_tracepoint_exp.succeeded()) {
@@ -207,7 +208,7 @@ int main(int argc, char *argv[]) {
   auto success_exp = perf_event_reader->exec(
     terminate,
 
-    [](const ebpfpub::ISyscallTracepoint::EventList &event_list) -> void {
+    [](const tob::ebpfpub::ISyscallTracepoint::EventList &event_list) -> void {
       for (const auto &event : event_list) {
         printEvent(event);
       }

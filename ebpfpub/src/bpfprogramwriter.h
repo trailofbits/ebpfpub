@@ -14,16 +14,16 @@
 
 #include <llvm/IR/IRBuilder.h>
 
-#include <ebpfpub/itracepointevent.h>
+#include <tob/ebpf/tracepointevent.h>
 
-namespace ebpfpub {
+namespace tob::ebpfpub {
 class BPFProgramWriter final {
 public:
   using Ref = std::unique_ptr<BPFProgramWriter>;
   static StringErrorOr<Ref> create(llvm::Module &module,
                                    BufferStorage &buffer_storage,
-                                   const ITracepointEvent &enter_event,
-                                   const ITracepointEvent &exit_event);
+                                   const ebpf::TracepointEvent &enter_event,
+                                   const ebpf::TracepointEvent &exit_event);
 
   virtual ~BPFProgramWriter();
 
@@ -79,8 +79,8 @@ public:
 
 protected:
   BPFProgramWriter(llvm::Module &module, BufferStorage &buffer_storage,
-                   const ITracepointEvent &enter_event,
-                   const ITracepointEvent &exit_event);
+                   const ebpf::TracepointEvent &enter_event,
+                   const ebpf::TracepointEvent &exit_event);
 
 private:
   llvm::Function *getPseudoInstrinsic();
@@ -90,10 +90,10 @@ private:
   std::unique_ptr<PrivateData> d;
 
   StringErrorOr<llvm::Type *> importTracepointEventType(
-      const ITracepointEvent::StructureField &structure_field);
+      const ebpf::TracepointEvent::StructureField &structure_field);
 
-  StringErrorOr<llvm::StructType *>
-  importTracepointEventStructure(const ITracepointEvent::Structure &structure,
-                                 const std::string &name);
+  StringErrorOr<llvm::StructType *> importTracepointEventStructure(
+      const ebpf::TracepointEvent::Structure &structure,
+      const std::string &name);
 };
-} // namespace ebpfpub
+} // namespace tob::ebpfpub

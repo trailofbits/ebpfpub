@@ -12,7 +12,7 @@
 
 #include <unordered_map>
 
-namespace ebpfpub {
+namespace tob::ebpfpub {
 namespace {
 std::unordered_map<std::string, ISyscallSerializer::Factory>
     kSyscallSerializerFactory;
@@ -79,4 +79,4 @@ StringErrorOr<ISyscallSerializer::Ref> createSerializer(std::string name) {
   const auto &factory = factory_it->second;
   return factory();
 }
-} // namespace ebpfpub
+} // namespace tob::ebpfpub
