@@ -1,13 +1,5 @@
-cmake_minimum_required(VERSION 3.15.5)
+cmake_minimum_required(VERSION 3.16.1)
 
-function(ebpfpubLibraries)
-  add_subdirectory("LLVM")
-  add_subdirectory("CLI11")
-  add_subdirectory("libbpf")
+add_subdirectory("ebpf-common")
+add_subdirectory("CLI11")
 
-  if(EBPFPUB_ENABLE_TESTS)
-    add_subdirectory("Catch2")
-  endif()
-endfunction()
-
-ebpfpubLibraries()

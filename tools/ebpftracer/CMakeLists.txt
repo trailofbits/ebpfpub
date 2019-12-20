@@ -21,7 +21,6 @@ function(toolsEbpftracer)
   )
 
   target_link_libraries(ebpftracer PRIVATE
-    ebpfpub_cxx_settings
     ebpfpub
     thirdparty_cli11
   )

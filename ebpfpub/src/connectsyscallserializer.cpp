@@ -14,13 +14,13 @@
 #include <netinet/in.h>
 #include <sys/un.h>
 
-namespace ebpfpub {
+namespace tob::ebpfpub {
 namespace {
 std::uint32_t kAddressStructSizeLimit{512U};
 }
 
 struct ConnectSyscallSerializer::PrivateData final {
-  ITracepointEvent::Structure enter_event_struct;
+  ebpf::TracepointEvent::Structure enter_event_struct;
 };
 
 ConnectSyscallSerializer::ConnectSyscallSerializer() : d(new PrivateData) {}
@@ -33,7 +33,7 @@ const std::string &ConnectSyscallSerializer::name() const {
 }
 
 SuccessOrStringError
-ConnectSyscallSerializer::generate(const ITracepointEvent &enter_event,
+ConnectSyscallSerializer::generate(const ebpf::TracepointEvent &enter_event,
                                    BPFProgramWriter &bpf_prog_writer) {
 
   // Save the enter event structure
@@ -249,4 +249,4 @@ ConnectSyscallSerializer::parseEvents(ISyscallTracepoint::Event &event,
 
   return {};
 }
-} // namespace ebpfpub
+} // namespace tob::ebpfpub

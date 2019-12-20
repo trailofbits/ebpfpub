@@ -11,7 +11,7 @@
 #include <cstring>
 #include <iostream>
 
-namespace ebpfpub {
+namespace tob::ebpfpub {
 namespace {
 template <typename Type>
 Type readType(const std::uint8_t *&buffer, std::size_t &buffer_size,
@@ -94,4 +94,4 @@ std::size_t BufferReader::bytesRead() const { return d->bytes_read; }
 std::size_t BufferReader::availableBytes() const {
   return d->buffer_size - d->bytes_read;
 }
-} // namespace ebpfpub
+} // namespace tob::ebpfpub

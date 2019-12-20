@@ -10,7 +10,7 @@
 
 #include <ebpfpub/iperfeventreader.h>
 
-namespace ebpfpub {
+namespace tob::ebpfpub {
 class PerfEventReader final : public IPerfEventReader {
 public:
   virtual ~PerfEventReader() override;
@@ -22,8 +22,8 @@ public:
        void (*callback)(const ISyscallTracepoint::EventList &)) override;
 
 protected:
-  PerfEventReader(IPerfEventArray::Ref perf_event_array,
-                  IBufferStorage::Ref buffer_storage);
+  PerfEventReader(ebpf::PerfEventArray &perf_event_array,
+                  IBufferStorage &buffer_storage);
 
 private:
   struct PrivateData;
@@ -31,4 +31,4 @@ private:
 
   friend class IPerfEventReader;
 };
-} // namespace ebpfpub
+} // namespace tob::ebpfpub

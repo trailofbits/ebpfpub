@@ -10,7 +10,7 @@
 
 #include <unordered_set>
 
-namespace ebpfpub {
+namespace tob::ebpfpub {
 namespace {
 StringErrorOr<std::string>
 bufferStorageEntryToString(std::uint64_t index, BufferStorage &buffer_storage) {
@@ -48,7 +48,7 @@ bufferStorageEntryToString(std::uint64_t index, BufferStorage &buffer_storage) {
 } // namespace
 
 struct GenericSyscallSerializer::PrivateData final {
-  ITracepointEvent::Structure enter_event_struct;
+  ebpf::TracepointEvent::Structure enter_event_struct;
   std::unordered_set<std::string> string_parameter_list;
 };
 
@@ -62,7 +62,7 @@ const std::string &GenericSyscallSerializer::name() const {
 }
 
 SuccessOrStringError
-GenericSyscallSerializer::generate(const ITracepointEvent &enter_event,
+GenericSyscallSerializer::generate(const ebpf::TracepointEvent &enter_event,
                                    BPFProgramWriter &bpf_prog_writer) {
 
   // Take the event entry
@@ -206,4 +206,4 @@ GenericSyscallSerializer::parseEvents(ISyscallTracepoint::Event &event,
 
   return {};
 }
-} // namespace ebpfpub
+} // namespace tob::ebpfpub

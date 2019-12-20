@@ -88,7 +88,7 @@ jobs:
     - name: Configure the project
       run: |
         export CCACHE_DIR="$(realpath ccache)"
-        ( cd build && ${{ steps.cmake_installer.outputs.CMAKE_BINARY }} -G Ninja -DEBPFPUB_TOOLCHAIN_PATH:PATH=${{ steps.osquery_toolchain_installer.outputs.PATH }} -DCMAKE_BUILD_TYPE:STRING=${{ matrix.build_type }} -DEBPFPUB_ENABLE_INSTALL:BOOL=true -DEBPFPUB_ENABLE_TOOLS:BOOL=true -DEBPFPUB_ENABLE_TESTS:BOOL=true -DEBPFPUB_ENABLE_SANITIZERS:BOOL=true .. )
+        ( cd build && ${{ steps.cmake_installer.outputs.CMAKE_BINARY }} -G Ninja -DEBPF_COMMON_TOOLCHAIN_PATH:PATH=${{ steps.osquery_toolchain_installer.outputs.PATH }} -DCMAKE_BUILD_TYPE:STRING=${{ matrix.build_type }} -DEBPFPUB_ENABLE_INSTALL:BOOL=true -DEBPFPUB_ENABLE_TOOLS:BOOL=true -DEBPF_COMMON_ENABLE_TESTS:BOOL=true -DEBPF_COMMON_ENABLE_SANITIZERS:BOOL=true .. )
 
     - name: Build the project
       run: |
@@ -96,7 +96,7 @@ jobs:
         ( cd build && ninja -v )
 
     - name: Run the tests
-      run: ( cd build && ninja -v run_ebpfpub_tests )
+      run: ( cd build && ninja -v run-ebpf-common-tests )
 
     - name: Install the project
       run: |

@@ -15,9 +15,9 @@
 #include <vector>
 
 #include <ebpfpub/ibufferstorage.h>
-#include <ebpfpub/iperfeventarray.h>
+#include <tob/ebpf/perfeventarray.h>
 
-namespace ebpfpub {
+namespace tob::ebpfpub {
 class ISyscallTracepoint {
 public:
   struct Event final {
@@ -60,8 +60,8 @@ public:
   using Ref = std::unique_ptr<ISyscallTracepoint>;
 
   static StringErrorOr<Ref> create(const std::string &syscall_name,
-                                   IBufferStorage::Ref buffer_storage,
-                                   IPerfEventArray::Ref perf_event_array,
+                                   IBufferStorage &buffer_storage,
+                                   ebpf::PerfEventArray &perf_event_array,
                                    std::size_t event_map_size);
 
   ISyscallTracepoint() = default;
@@ -76,4 +76,4 @@ public:
   ISyscallTracepoint(const ISyscallTracepoint &) = delete;
   ISyscallTracepoint &operator=(const ISyscallTracepoint &) = delete;
 };
-} // namespace ebpfpub
+} // namespace tob::ebpfpub

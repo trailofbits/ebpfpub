@@ -12,7 +12,7 @@
 
 #include <memory>
 
-namespace ebpfpub {
+namespace tob::ebpfpub {
 class ConnectSyscallSerializer final : public ISyscallSerializer {
 public:
   ConnectSyscallSerializer();
@@ -21,7 +21,7 @@ public:
   virtual const std::string &name() const override;
 
   virtual SuccessOrStringError
-  generate(const ITracepointEvent &enter_event,
+  generate(const ebpf::TracepointEvent &enter_event,
            BPFProgramWriter &bpf_prog_writer) override;
 
   virtual SuccessOrStringError
@@ -32,4 +32,4 @@ private:
   struct PrivateData;
   std::unique_ptr<PrivateData> d;
 };
-} // namespace ebpfpub
+} // namespace tob::ebpfpub

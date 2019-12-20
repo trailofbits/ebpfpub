@@ -1,9 +1,6 @@
-[submodule "libraries/Catch2/src"]
-	path = libraries/Catch2/src
-	url = https://github.com/catchorg/Catch2.git
 [submodule "libraries/CLI11/src"]
 	path = libraries/CLI11/src
 	url = https://github.com/CLIUtils/CLI11
-[submodule "libraries/libbpf/src"]
-	path = libraries/libbpf/src
-	url = https://github.com/libbpf/libbpf
+[submodule "libraries/ebpf-common/src"]
+	path = libraries/ebpf-common/src
+	url = https://github.com/trailofbits/ebpf-common

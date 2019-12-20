@@ -12,16 +12,17 @@
 #include <memory>
 
 #include <ebpfpub/ibufferstorage.h>
-#include <ebpfpub/iperfeventarray.h>
 #include <ebpfpub/isyscalltracepoint.h>
 
-namespace ebpfpub {
+#include <tob/ebpf/perfeventarray.h>
+
+namespace tob::ebpfpub {
 class IPerfEventReader {
 public:
-  using Ref = std::shared_ptr<IPerfEventReader>;
+  using Ref = std::unique_ptr<IPerfEventReader>;
 
-  static StringErrorOr<Ref> create(IPerfEventArray::Ref perf_event_array,
-                                   IBufferStorage::Ref buffer_storage);
+  static StringErrorOr<Ref> create(ebpf::PerfEventArray &perf_event_array,
+                                   IBufferStorage &buffer_storage);
 
   IPerfEventReader() = default;
   virtual ~IPerfEventReader() = default;
@@ -35,4 +36,4 @@ public:
   IPerfEventReader(const IPerfEventReader &) = delete;
   IPerfEventReader &operator=(const IPerfEventReader &) = delete;
 };
-} // namespace ebpfpub
+} // namespace tob::ebpfpub

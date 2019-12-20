@@ -11,12 +11,12 @@
 #include <memory>
 #include <unordered_map>
 
-#include <ebpfpub/error.h>
+#include <tob/error/error.h>
 
-namespace ebpfpub {
+namespace tob::ebpfpub {
 class IBufferStorage {
 public:
-  using Ref = std::shared_ptr<IBufferStorage>;
+  using Ref = std::unique_ptr<IBufferStorage>;
   static StringErrorOr<Ref> create(std::size_t buffer_size,
                                    std::size_t buffer_count);
 
@@ -30,4 +30,4 @@ public:
   IBufferStorage(const IBufferStorage &) = delete;
   IBufferStorage &operator=(const IBufferStorage &) = delete;
 };
-} // namespace ebpfpub
+} // namespace tob::ebpfpub

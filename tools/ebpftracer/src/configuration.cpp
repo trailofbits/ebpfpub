@@ -1,6 +1,6 @@
 #include "configuration.h"
 
-namespace ebpfpub {
+namespace tob::ebpfpub {
 StringErrorOr<UserSettings> parseUserSettings(int argc, char *argv[]) {
   CLI::App application("eBPFTracer");
 
@@ -54,4 +54,4 @@ StringErrorOr<UserSettings> parseUserSettings(int argc, char *argv[]) {
     return StringError::create(message);
   }
 }
-} // namespace ebpfpub
+} // namespace tob::ebpfpub

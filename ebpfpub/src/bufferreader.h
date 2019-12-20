@@ -11,7 +11,7 @@
 #include <cstdint>
 #include <memory>
 
-namespace ebpfpub {
+namespace tob::ebpfpub {
 class BufferReader final {
 public:
   BufferReader(const std::uint8_t *buffer, std::size_t buffer_size);
@@ -41,4 +41,4 @@ private:
   struct PrivateData;
   std::unique_ptr<PrivateData> d;
 };
-} // namespace ebpfpub
+} // namespace tob::ebpfpub

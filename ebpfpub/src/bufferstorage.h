@@ -8,15 +8,15 @@
 
 #pragma once
 
-#include "bpfmap.h"
-
 #include <vector>
 
 #include <ebpfpub/ibufferstorage.h>
 
 #include <linux/bpf.h>
 
-namespace ebpfpub {
+#include <tob/ebpf/bpfmap.h>
+
+namespace tob::ebpfpub {
 class BufferStorage final : public IBufferStorage {
 public:
   virtual ~BufferStorage();
@@ -28,8 +28,8 @@ public:
   int bufferMap() const;
   int indexMap() const;
 
-  BPFMapErrorCode getBuffer(std::vector<std::uint8_t> &value,
-                            std::uint64_t index);
+  ebpf::BPFMapErrorCode getBuffer(std::vector<std::uint8_t> &value,
+                                  std::uint64_t index);
 
   BufferStorage(const BufferStorage &) = delete;
   BufferStorage &operator=(const BufferStorage &) = delete;
@@ -43,4 +43,4 @@ private:
 
   friend class IBufferStorage;
 };
-} // namespace ebpfpub
+} // namespace tob::ebpfpub

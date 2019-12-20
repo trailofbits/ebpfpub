@@ -41,20 +41,51 @@ function(ebpfpubPackageGenerator)
 
   install(
     FILES
-      "${EBPFPUB_INSTALL_PATH}/usr/local/include/ebpfpub/itracepointevent.h"
-      "${EBPFPUB_INSTALL_PATH}/usr/local/include/ebpfpub/error.h"
-      "${EBPFPUB_INSTALL_PATH}/usr/local/include/ebpfpub/iperfeventarray.h"
-      "${EBPFPUB_INSTALL_PATH}/usr/local/include/ebpfpub/stringerror.h"
-      "${EBPFPUB_INSTALL_PATH}/usr/local/include/ebpfpub/successor.h"
       "${EBPFPUB_INSTALL_PATH}/usr/local/include/ebpfpub/iperfeventreader.h"
-      "${EBPFPUB_INSTALL_PATH}/usr/local/include/ebpfpub/errorcode.h"
-      "${EBPFPUB_INSTALL_PATH}/usr/local/include/ebpfpub/erroror.h"
       "${EBPFPUB_INSTALL_PATH}/usr/local/include/ebpfpub/isyscalltracepoint.h"
-      "${EBPFPUB_INSTALL_PATH}/usr/local/include/ebpfpub/uniqueref.h"
       "${EBPFPUB_INSTALL_PATH}/usr/local/include/ebpfpub/ibufferstorage.h"
 
     DESTINATION
       "include/ebpfpub"
+  )
+
+  install(
+    FILES
+      "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/ebpf/sectionmemorymanager.h"
+      "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/ebpf/typedbpfmap.h"
+      "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/ebpf/tracepointevent.h"
+      "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/ebpf/llvm_utils.h"
+      "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/ebpf/bpfmap.h"
+      "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/ebpf/ebpf_utils.h"
+      "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/ebpf/types.h"
+      "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/ebpf/perfeventarray.h"
+
+    DESTINATION
+      "include/tob/ebpf"
+  )
+
+
+  install(
+    FILES
+      "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/error/successor.h"
+      "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/error/erroror.h"
+      "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/error/error.h"
+      "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/error/stringerror.h"
+      "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/error/errorcode.h"
+
+    DESTINATION
+      "include/tob/error"
+  )
+
+
+  install(
+    FILES
+      "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/utils/uniquefd.h"
+      "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/utils/uniquemappedmemory.h"
+      "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/utils/uniqueref.h"
+
+    DESTINATION
+      "include/tob/utils"
   )
 
   install(

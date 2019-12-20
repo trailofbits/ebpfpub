@@ -14,9 +14,8 @@
 #include <llvm/IR/DerivedTypes.h>
 
 #include <ebpfpub/isyscalltracepoint.h>
-#include <ebpfpub/itracepointevent.h>
 
-namespace ebpfpub {
+namespace tob::ebpfpub {
 class SyscallTracepoint final : public ISyscallTracepoint {
 public:
   virtual ~SyscallTracepoint();
@@ -29,13 +28,13 @@ public:
 
   StringErrorOr<EventList> parseEvents(BufferReader &buffer_reader) const;
 
-  SuccessOrStringError start() const;
-  void stop() const;
+  SuccessOrStringError start();
+  void stop();
 
 protected:
   SyscallTracepoint(const std::string &syscall_name,
-                    IBufferStorage::Ref buffer_storage,
-                    IPerfEventArray::Ref perf_event_array,
+                    IBufferStorage &buffer_storage,
+                    ebpf::PerfEventArray &perf_event_array,
                     std::size_t event_map_size);
 
 private:
@@ -49,6 +48,11 @@ private:
 
   SuccessOrStringError finalizeExitFunction(BPFProgramWriter &bpf_prog_writer);
 
+  StringErrorOr<std::vector<std::string>> getTracepointEnableSwitchList();
+
+  SuccessOrStringError enableTracepoints();
+  SuccessOrStringError disableTracepoints();
+
   friend class ISyscallTracepoint;
 };
-} // namespace ebpfpub
+} // namespace tob::ebpfpub

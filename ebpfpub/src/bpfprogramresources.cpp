@@ -8,7 +8,7 @@
 
 #include "bpfprogramresources.h"
 
-namespace ebpfpub {
+namespace tob::ebpfpub {
 struct BPFProgramResources::PrivateData final {
   StackMap::Ref event_stack_map;
   StackMap::Ref buffer_stack_map;
@@ -61,4 +61,4 @@ static_assert(
   "BPFProgramResources must be movable"
 );
 // clang-format on
-} // namespace ebpfpub
+} // namespace tob::ebpfpub
