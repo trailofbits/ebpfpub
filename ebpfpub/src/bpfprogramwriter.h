@@ -14,6 +14,7 @@
 
 #include <llvm/IR/IRBuilder.h>
 
+#include <tob/ebpf/bpfsyscallinterface.h>
 #include <tob/ebpf/tracepointevent.h>
 
 namespace tob::ebpfpub {
@@ -28,6 +29,8 @@ public:
   virtual ~BPFProgramWriter();
 
   llvm::IRBuilder<> &builder();
+  ebpf::BPFSyscallInterface &bpfSyscallInterface();
+
   llvm::Module &module();
   llvm::LLVMContext &context();
 
@@ -53,27 +56,6 @@ public:
   SuccessOrStringError captureBuffer(llvm::Value *buffer_pointer,
                                      llvm::Value *buffer_size);
 
-  llvm::Value *bpf_get_current_pid_tgid();
-  llvm::Value *bpf_ktime_get_ns();
-  llvm::Value *bpf_get_current_uid_gid();
-  llvm::Value *bpf_get_smp_processor_id();
-
-  llvm::Value *bpf_map_lookup_elem(int map_fd, llvm::Value *key,
-                                   llvm::Type *type);
-
-  void bpf_map_update_elem(int map_fd, llvm::Value *value, llvm::Value *key,
-                           int flags);
-
-  llvm::Value *bpf_probe_read_str(llvm::Value *dest, std::size_t size,
-                                  llvm::Value *src);
-
-  llvm::Value *bpf_probe_read(llvm::Value *dest, llvm::Value *size,
-                              llvm::Value *src);
-
-  SuccessOrStringError bpf_perf_event_output(int map_fd, std::uint64_t flags,
-                                             llvm::Value *data_ptr,
-                                             std::uint32_t data_size);
-
   BPFProgramWriter(const BPFProgramWriter &) = delete;
   BPFProgramWriter &operator=(const BPFProgramWriter &) = delete;
 
@@ -83,9 +65,6 @@ protected:
                    const ebpf::TracepointEvent &exit_event);
 
 private:
-  llvm::Function *getPseudoInstrinsic();
-  llvm::Value *bpf_pseudo_map_fd(int fd);
-
   struct PrivateData;
   std::unique_ptr<PrivateData> d;
 
