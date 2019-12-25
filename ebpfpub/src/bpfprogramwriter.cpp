@@ -65,6 +65,7 @@ struct BPFProgramWriter::PrivateData final {
   llvm::LLVMContext &context;
 
   llvm::IRBuilder<> builder;
+  ebpf::BPFSyscallInterface::Ref bpf_syscall_interface;
 
   BufferStorage &buffer_storage;
 
@@ -93,6 +94,10 @@ BPFProgramWriter::create(llvm::Module &module, BufferStorage &buffer_storage,
 BPFProgramWriter::~BPFProgramWriter() {}
 
 llvm::IRBuilder<> &BPFProgramWriter::builder() { return d->builder; }
+
+ebpf::BPFSyscallInterface &BPFProgramWriter::bpfSyscallInterface() {
+  return *d->bpf_syscall_interface.get();
+}
 
 llvm::Module &BPFProgramWriter::module() { return d->module; }
 
@@ -295,315 +300,19 @@ StringErrorOr<llvm::Value *> BPFProgramWriter::value(const std::string &name) {
 
 void BPFProgramWriter::clearSavedValues() { d->saved_value_map.clear(); }
 
-llvm::Value *BPFProgramWriter::bpf_get_current_pid_tgid() {
-  // clang-format off
-  auto function_type = llvm::FunctionType::get(
-    llvm::Type::getInt64Ty(d->context),
-    {},
-    false
-  );
-  // clang-format on
-
-  auto function = d->builder.CreateIntToPtr(
-      d->builder.getInt64(BPF_FUNC_get_current_pid_tgid),
-      llvm::PointerType::getUnqual(function_type));
-
-  return d->builder.CreateCall(function);
-}
-
-llvm::Value *BPFProgramWriter::bpf_ktime_get_ns() {
-  // clang-format off
-  auto function_type = llvm::FunctionType::get(
-    llvm::Type::getInt64Ty(d->context),
-    {},
-    false
-  );
-  // clang-format on
-
-  auto function =
-      d->builder.CreateIntToPtr(d->builder.getInt64(BPF_FUNC_ktime_get_ns),
-                                llvm::PointerType::getUnqual(function_type));
-
-  return d->builder.CreateCall(function);
-}
-
-llvm::Value *BPFProgramWriter::bpf_get_current_uid_gid() {
-  // clang-format off
-  auto function_type = llvm::FunctionType::get(
-    llvm::Type::getInt64Ty(d->context),
-    {},
-    false
-  );
-  // clang-format on
-
-  auto function = d->builder.CreateIntToPtr(
-      d->builder.getInt64(BPF_FUNC_get_current_uid_gid),
-      llvm::PointerType::getUnqual(function_type));
-
-  return d->builder.CreateCall(function);
-}
-
-llvm::Value *BPFProgramWriter::bpf_get_smp_processor_id() {
-  // clang-format off
-  auto function_type = llvm::FunctionType::get(
-    llvm::Type::getInt32Ty(d->context),
-    {},
-    false
-  );
-  // clang-format on
-
-  auto function = d->builder.CreateIntToPtr(
-      d->builder.getInt64(BPF_FUNC_get_smp_processor_id),
-      llvm::PointerType::getUnqual(function_type));
-
-  return d->builder.CreateCall(function);
-}
-
-llvm::Value *BPFProgramWriter::bpf_map_lookup_elem(int map_fd, llvm::Value *key,
-                                                   llvm::Type *type) {
-
-  // clang-format off
-  auto function_type = llvm::FunctionType::get(
-    type,
-
-    {
-      // Map address
-      llvm::Type::getInt64PtrTy(context()),
-
-      // key address
-      key->getType()
-    },
-
-    false
-  );
-  // clang-format on
-
-  auto function =
-      d->builder.CreateIntToPtr(builder().getInt64(BPF_FUNC_map_lookup_elem),
-                                llvm::PointerType::getUnqual(function_type));
-
-  auto map_ptr_address_value = bpf_pseudo_map_fd(map_fd);
-
-  return d->builder.CreateCall(function, {map_ptr_address_value, key});
-}
-
-void BPFProgramWriter::bpf_map_update_elem(int map_fd, llvm::Value *value,
-                                           llvm::Value *key, int flags) {
-  // clang-format off
-  auto function_type = llvm::FunctionType::get(
-    llvm::Type::getInt64Ty(d->context),
-
-    {
-      // Map address
-      llvm::Type::getInt64PtrTy(d->context),
-
-      // key address
-      key->getType(),
-
-      // value address
-      value->getType(),
-
-      // flags
-      llvm::Type::getInt64Ty(d->context)
-    },
-
-    false
-  );
-  // clang-format on
-
-  auto function =
-      d->builder.CreateIntToPtr(d->builder.getInt64(BPF_FUNC_map_update_elem),
-                                llvm::PointerType::getUnqual(function_type));
-
-  auto map_ptr_address_value = bpf_pseudo_map_fd(map_fd);
-
-  d->builder.CreateCall(
-      function, {map_ptr_address_value, key, value,
-                 d->builder.getInt64(static_cast<std::uint32_t>(flags))});
-}
-
-llvm::Value *BPFProgramWriter::bpf_probe_read_str(llvm::Value *dest,
-                                                  std::size_t size,
-                                                  llvm::Value *src) {
-
-  // clang-format off
-  auto function_type = llvm::FunctionType::get(
-    llvm::Type::getInt64Ty(d->context),
-
-    {
-      // Destination address
-      llvm::Type::getInt8PtrTy(d->context),
-
-      // Size
-      llvm::Type::getInt32Ty(d->context),
-
-      // Source address
-      llvm::Type::getInt8PtrTy(d->context),
-    },
-
-    false
-  );
-  // clang-format on
-
-  auto function =
-      d->builder.CreateIntToPtr(d->builder.getInt64(BPF_FUNC_probe_read_str),
-                                llvm::PointerType::getUnqual(function_type));
-
-  return d->builder.CreateCall(
-      function,
-      {dest, d->builder.getInt32(static_cast<std::uint32_t>(size)), src});
-}
-
-llvm::Value *BPFProgramWriter::bpf_probe_read(llvm::Value *dest,
-                                              llvm::Value *size,
-                                              llvm::Value *src) {
-
-  // clang-format off
-  auto function_type = llvm::FunctionType::get(
-    llvm::Type::getInt64Ty(d->context),
-
-    {
-      // Destination address
-      llvm::Type::getInt8PtrTy(d->context),
-
-      // Size
-      size->getType(),
-
-      // Source address
-      llvm::Type::getInt8PtrTy(d->context),
-    },
-
-    false
-  );
-  // clang-format on
-
-  auto function =
-      d->builder.CreateIntToPtr(d->builder.getInt64(BPF_FUNC_probe_read),
-                                llvm::PointerType::getUnqual(function_type));
-
-  return d->builder.CreateCall(function, {dest, size, src});
-}
-
-SuccessOrStringError
-BPFProgramWriter::bpf_perf_event_output(int map_fd, std::uint64_t flags,
-                                        llvm::Value *data_ptr,
-                                        std::uint32_t data_size) {
-
-  auto &llvm_context = d->context;
-  auto &builder = d->builder;
-
-  // Get the current function
-  auto current_block = builder.GetInsertBlock();
-  if (current_block == nullptr) {
-    return StringError::create("No active basic block");
-  }
-
-  auto current_function = current_block->getParent();
-  if (current_function == nullptr) {
-    return StringError::create("No active function");
-  }
-
-  // The first parameter for this syscall is the context; in our case, it's the
-  // function argument
-  auto context_value = current_function->arg_begin();
-  auto context_type = context_value->getType();
-
-  // clang-format off
-  auto function_type = llvm::FunctionType::get(
-    llvm::Type::getInt64Ty(llvm_context),
-
-    {
-      // Context
-      context_type,
-
-      // Map address
-      llvm::Type::getInt64PtrTy(llvm_context),
-
-      // Flags
-      llvm::Type::getInt64Ty(llvm_context),
-
-      // Data pointer
-      data_ptr->getType(),
-
-      // Data size
-      llvm::Type::getInt64Ty(llvm_context)
-    },
-
-    false
-  );
-  // clang-format on
-
-  auto function =
-      builder.CreateIntToPtr(builder.getInt64(BPF_FUNC_perf_event_output),
-                             llvm::PointerType::getUnqual(function_type));
-
-  auto map_ptr_address_value = bpf_pseudo_map_fd(map_fd);
-
-  // clang-format off
-  builder.CreateCall(
-    function,
-    
-    {
-      context_value,
-      map_ptr_address_value,
-      builder.getInt64(flags),
-      data_ptr,
-      builder.getInt64(static_cast<std::uint64_t>(data_size))
-    }
-  );
-  // clang-format on
-
-  return {};
-}
-
 BPFProgramWriter::BPFProgramWriter(llvm::Module &module,
                                    BufferStorage &buffer_storage,
                                    const ebpf::TracepointEvent &enter_event,
                                    const ebpf::TracepointEvent &exit_event)
-    : d(new PrivateData(module, buffer_storage, enter_event, exit_event)) {}
+    : d(new PrivateData(module, buffer_storage, enter_event, exit_event)) {
 
-llvm::Function *BPFProgramWriter::getPseudoInstrinsic() {
-  llvm::Function *pseudo_function = module().getFunction("llvm.bpf.pseudo");
-
-  if (pseudo_function == nullptr) {
-    // clang-format off
-    auto pseudo_function_type = llvm::FunctionType::get(
-      llvm::Type::getInt64Ty(d->context),
-
-      {
-        llvm::Type::getInt64Ty(d->context),
-        llvm::Type::getInt64Ty(d->context)
-      },
-
-      false
-    );
-    // clang-format on
-
-    pseudo_function = llvm::Function::Create(pseudo_function_type,
-                                             llvm::GlobalValue::ExternalLinkage,
-                                             "llvm.bpf.pseudo", module());
+  auto bpf_syscall_interface_exp =
+      ebpf::BPFSyscallInterface::create(d->builder);
+  if (!bpf_syscall_interface_exp.succeeded()) {
+    throw bpf_syscall_interface_exp.error();
   }
 
-  return pseudo_function;
-}
-
-llvm::Value *BPFProgramWriter::bpf_pseudo_map_fd(int fd) {
-  auto pseudo_function = getPseudoInstrinsic();
-  auto map_fd = static_cast<std::uint64_t>(fd);
-
-  // clang-format off
-  auto map_integer_address_value = d->builder.CreateCall(
-    pseudo_function,
-
-    {
-      d->builder.getInt64(BPF_PSEUDO_MAP_FD),
-      d->builder.getInt64(map_fd)
-    }
-  );
-  // clang-format on
-
-  return d->builder.CreateIntToPtr(map_integer_address_value,
-                                   llvm::Type::getInt64PtrTy(d->context));
+  d->bpf_syscall_interface = bpf_syscall_interface_exp.takeValue();
 }
 
 StringErrorOr<llvm::Type *> BPFProgramWriter::importTracepointEventType(
@@ -708,7 +417,7 @@ BPFProgramWriter::markBufferStorageIndex(llvm::Value *buffer_storage_index) {
   // Get or retrieve the current the processor id
   auto value_exp = value("current_processor_id");
   if (!value_exp.succeeded()) {
-    auto current_processor_id = bpf_get_smp_processor_id();
+    auto current_processor_id = d->bpf_syscall_interface->getSmpProcessorId();
 
     current_processor_id =
         builder().CreateZExt(current_processor_id, builder().getInt64Ty());
@@ -791,7 +500,7 @@ BPFProgramWriter::captureString(llvm::Value *string_pointer) {
   // Read the user memory
   auto pointer_value = builder().CreateLoad(string_pointer);
 
-  auto read_error = bpf_probe_read_str(
+  auto read_error = d->bpf_syscall_interface->probeReadStr(
       buffer_storage_stack, buffer_storage_entry_size, pointer_value);
 
   read_error = builder().CreateBinOp(llvm::Instruction::And, read_error,
@@ -813,8 +522,9 @@ BPFProgramWriter::captureString(llvm::Value *string_pointer) {
   // Save the string to the buffer storage
   builder().CreateStore(buffer_storage_index, buffer_storage_entry_key);
 
-  bpf_map_update_elem(buffer_storage_fd, buffer_storage_stack,
-                      buffer_storage_entry_key, BPF_ANY);
+  d->bpf_syscall_interface->mapUpdateElem(buffer_storage_fd,
+                                          buffer_storage_stack,
+                                          buffer_storage_entry_key, BPF_ANY);
 
   // Update the string pointer
   auto marked_index_exp = markBufferStorageIndex(buffer_storage_index);
@@ -883,8 +593,8 @@ BPFProgramWriter::captureBuffer(llvm::Value *buffer_pointer,
   // Read the user memory
   auto pointer_value = builder().CreateLoad(buffer_pointer);
 
-  auto read_error =
-      bpf_probe_read(buffer_storage_stack, buffer_size, pointer_value);
+  auto read_error = d->bpf_syscall_interface->probeRead(
+      buffer_storage_stack, buffer_size, pointer_value);
 
   read_error = builder().CreateBinOp(llvm::Instruction::And, read_error,
                                      builder().getInt64(0x8000000000000000ULL));
@@ -907,8 +617,9 @@ BPFProgramWriter::captureBuffer(llvm::Value *buffer_pointer,
 
   auto buffer_storage_fd = d->buffer_storage.bufferMap();
 
-  bpf_map_update_elem(buffer_storage_fd, buffer_storage_stack,
-                      buffer_storage_entry_key, BPF_ANY);
+  d->bpf_syscall_interface->mapUpdateElem(buffer_storage_fd,
+                                          buffer_storage_stack,
+                                          buffer_storage_entry_key, BPF_ANY);
 
   // Update the string pointer
   auto marked_index_exp = markBufferStorageIndex(buffer_storage_index);

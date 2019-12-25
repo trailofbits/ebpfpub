@@ -359,7 +359,9 @@ SyscallTracepoint::generateEnterFunction(BPFProgramWriter &bpf_prog_writer) {
   // Automatically filter out this event if it's coming from our PID
   auto process_id = builder.getInt64(static_cast<std::uint64_t>(getpid()));
 
-  auto current_pid_tgid = bpf_prog_writer.bpf_get_current_pid_tgid();
+  auto &bpf_syscall_interface = bpf_prog_writer.bpfSyscallInterface();
+
+  auto current_pid_tgid = bpf_syscall_interface.getCurrentPidTgid();
 
   auto current_tgid =
       builder.CreateBinOp(llvm::Instruction::And, current_pid_tgid,
@@ -391,7 +393,7 @@ SyscallTracepoint::generateEnterFunction(BPFProgramWriter &bpf_prog_writer) {
   auto event_entry_type = event_entry_type_exp.takeValue();
   auto event_entry_type_ptr = event_entry_type->getPointerTo();
 
-  auto event_stack_ptr = bpf_prog_writer.bpf_map_lookup_elem(
+  auto event_stack_ptr = bpf_syscall_interface.mapLookupElem(
       d->program_resources.eventStackMap().fd(), stack_space_key,
       event_entry_type_ptr);
 
@@ -450,7 +452,7 @@ SyscallTracepoint::generateEnterFunction(BPFProgramWriter &bpf_prog_writer) {
   event_header_field = builder.CreateGEP(
       event_header, {builder.getInt32(0), builder.getInt32(field_index)});
 
-  auto event_header_field_value = bpf_prog_writer.bpf_ktime_get_ns();
+  auto event_header_field_value = bpf_syscall_interface.ktimeGetNs();
 
   builder.CreateStore(event_header_field_value, event_header_field);
 
@@ -468,7 +470,7 @@ SyscallTracepoint::generateEnterFunction(BPFProgramWriter &bpf_prog_writer) {
   event_header_field = builder.CreateGEP(
       event_header, {builder.getInt32(0), builder.getInt32(field_index)});
 
-  event_header_field_value = bpf_prog_writer.bpf_get_current_uid_gid();
+  event_header_field_value = bpf_syscall_interface.getCurrentUidGid();
 
   builder.CreateStore(event_header_field_value, event_header_field);
 
@@ -533,7 +535,7 @@ SyscallTracepoint::generateEnterFunction(BPFProgramWriter &bpf_prog_writer) {
   // Store the event data we collected for later
   //
 
-  bpf_prog_writer.bpf_map_update_elem(d->program_resources.eventMap().fd(),
+  bpf_syscall_interface.mapUpdateElem(d->program_resources.eventMap().fd(),
                                       event_stack_ptr, event_entry_key,
                                       BPF_ANY);
 
@@ -586,7 +588,9 @@ SyscallTracepoint::initializeExitFunction(BPFProgramWriter &bpf_prog_writer) {
                            buffer_storage_entry_key);
 
   // Get the event entry
-  auto current_pid_tgid = bpf_prog_writer.bpf_get_current_pid_tgid();
+  auto &bpf_syscall_interface = bpf_prog_writer.bpfSyscallInterface();
+
+  auto current_pid_tgid = bpf_syscall_interface.getCurrentPidTgid();
 
   builder.CreateStore(current_pid_tgid, event_entry_key);
 
@@ -600,7 +604,7 @@ SyscallTracepoint::initializeExitFunction(BPFProgramWriter &bpf_prog_writer) {
 
   auto event_map_fd = d->program_resources.eventMap().fd();
 
-  auto event_entry = bpf_prog_writer.bpf_map_lookup_elem(
+  auto event_entry = bpf_syscall_interface.mapLookupElem(
       event_map_fd, event_entry_key, event_entry_type_ptr);
 
   bpf_prog_writer.setValue("event_entry", event_entry);
@@ -629,7 +633,7 @@ SyscallTracepoint::initializeExitFunction(BPFProgramWriter &bpf_prog_writer) {
 
   auto &buffer_storage_impl = static_cast<BufferStorage &>(d->buffer_storage);
 
-  auto buffer_storage_index = bpf_prog_writer.bpf_map_lookup_elem(
+  auto buffer_storage_index = bpf_syscall_interface.mapLookupElem(
       buffer_storage_impl.indexMap(), buffer_storage_entry_key,
       llvm::Type::getInt32PtrTy(context));
 
@@ -659,7 +663,7 @@ SyscallTracepoint::initializeExitFunction(BPFProgramWriter &bpf_prog_writer) {
 
   auto buffer_stack_map_fd = d->program_resources.bufferStackMap().fd();
 
-  auto buffer_storage_stack = bpf_prog_writer.bpf_map_lookup_elem(
+  auto buffer_storage_stack = bpf_syscall_interface.mapLookupElem(
       buffer_stack_map_fd, buffer_storage_entry_key, builder.getInt8PtrTy());
 
   bpf_prog_writer.setValue("buffer_storage_stack", buffer_storage_stack);
@@ -766,9 +770,13 @@ SyscallTracepoint::finalizeExitFunction(BPFProgramWriter &bpf_prog_writer) {
   // Send the event entry through perf_event
   auto perf_event_array_fd = d->perf_event_array.fd();
 
-  auto success_exp = bpf_prog_writer.bpf_perf_event_output(
-      perf_event_array_fd, static_cast<std::uint32_t>(-1LL), event_entry,
-      event_entry_size);
+  auto bpf_context = exit_function->arg_begin();
+
+  auto &bpf_syscall_interface = bpf_prog_writer.bpfSyscallInterface();
+
+  bpf_syscall_interface.perfEventOutput(bpf_context, perf_event_array_fd,
+                                        static_cast<std::uint32_t>(-1LL),
+                                        event_entry, event_entry_size);
 
   // Terminate the function
   builder.CreateRet(builder.getInt64(0));
