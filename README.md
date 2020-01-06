@@ -41,23 +41,67 @@ Some of the above resources require the use of per-CPU maps, which perform the s
 ### Prerequisites
 * A recent Clang/LLVM installation (8.0 or better), compiled with BPF support
 * A recent libc++ or stdc++ library, supporting C++17
-* CMake
+* CMake >= 3.16.2. A pre-built binary can be downloaded from the [CMake's download page](https://cmake.org/download/).
 * Linux kernel >= 4.18 (Ubuntu 18.10)
 
-Please note that LLVM itself must be compiled with libc++ when enabling the `EBPFPUB_ENABLE_LIBC++` option, since ebfpub will directly link against the LLVM libraries.
+Please note that LLVM itself must be compiled with libc++ when enabling the `EBPF_COMMON_ENABLE_LIBCPP` option, since ebfpub will directly link against the LLVM libraries.
 
 ### Dependencies
 * [ebpf-common](https://github.com/trailofbits/ebpf-common)
 
-### Steps
+### Building with the osquery toolchain (preferred)
+
+**This should work fine on any recent Linux distribution.**
+
+The osquery-toolchain needs to be obtained first, but version 1.0.0 does not yet ship with LLVM/Clang libraries. It is possible to download the 1.0.1 prerelease from https://alessandrogar.io/downloads/osquery-toolchain-1.0.1.tar.xz. See the following PR for more information: https://github.com/osquery/osquery-toolchain/pull/14
 
 1. Obtain the source code: `git clone --recursive https://github.com/trailofbits/ebpfpub`
 2. In case the `--recursive` flag was not provided, run `git submodule update --init --recursive`
 3. Enter the source folder: `cd ebpfpub`
 4. Create the build folder: `mkdir build && cd build`
-5. Configure the project: `cmake -DCMAKE_BUILD_TYPE:STRING=RelWithDebInfo -DCMAKE_C_COMPILER:STRING=clang -DCMAKE_CXX_COMPILER:STRING=clang++ -DEBPFPUB_ENABLE_TESTS:BOOLEAN=true ..`
+5. Configure the project: `cmake -DCMAKE_BUILD_TYPE:STRING=RelWithDebInfo -DEBPF_COMMON_TOOLCHAIN_PATH:PATH=/path/to/osquery-toolchain -DEBPFPUB_ENABLE_INSTALL:BOOL=true -DEBPFPUB_ENABLE_TOOLS:BOOL=true -DEBPF_COMMON_ENABLE_TESTS:BOOL=true ..`
 6. Build the project: `cmake --build . -j $(($(nproc) + 1))`
-7. Run the tests: `cmake --build . --target run_ebpfpub_tests`
+7. Run the tests: `cmake --build . --target run-ebpf-common-tests`
+
+### Building with the system toolchain
+
+**Note that this will fail unless clang and the C++ library both support C++17**. Recent distributions should be compatible (tested on Arch Linux, Ubuntu 19.10).
+
+1. Obtain the source code: `git clone --recursive https://github.com/trailofbits/ebpfpub`
+2. In case the `--recursive` flag was not provided, run `git submodule update --init --recursive`
+3. Enter the source folder: `cd ebpfpub`
+4. Create the build folder: `mkdir build && cd build`
+5. Configure the project: `cmake -DCMAKE_BUILD_TYPE:STRING=RelWithDebInfo -DCMAKE_C_COMPILER:STRING=clang -DCMAKE_CXX_COMPILER=clang++ -DEBPFPUB_ENABLE_INSTALL:BOOL=true -DEBPFPUB_ENABLE_TOOLS:BOOL=true -DEBPF_COMMON_ENABLE_TESTS:BOOL=true ..`
+6. Build the project: `cmake --build . -j $(($(nproc) + 1))`
+7. Run the tests: `cmake --build . --target run-ebpf-common-tests`
+
+### Building the packages
+
+## Prerequisites
+* DEB: **dpkg** command
+* RPM: **rpm** command
+* TGZ: **tar** command
+
+## Steps
+Run the following commands inside the build folder:
+
+```
+mkdir install
+export DESTDIR=`realpath install`
+
+cd build
+cmake --build . --target install
+```
+
+Configure the packaging project:
+
+```
+mkdir package
+cd package
+
+cmake -DEBPFPUB_INSTALL_PATH:PATH="${DESTDIR}" /path/to/source_folder/package_generator
+cmake --build . --target package
+```
 
 ## eBPFTracer
 
