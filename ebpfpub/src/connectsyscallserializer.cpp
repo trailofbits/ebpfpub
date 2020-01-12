@@ -71,21 +71,15 @@ ConnectSyscallSerializer::generate(const ebpf::TracepointEvent &enter_event,
   auto address_len = builder.CreateLoad(address_len_ptr);
 
   // Limit the amount of bytes that can be specified inside the size field
-  llvm::Value *address_len_limit{nullptr};
+  auto address_len_limit = builder.getInt32(kAddressStructSizeLimit);
   auto address_len_type_size = d->enter_event_struct.at(5U + 2U).size;
 
-  if (address_len_type_size == 4U) {
-    address_len_limit = builder.getInt32(kAddressStructSizeLimit);
-
-  } else if (address_len_type_size == 8U) {
-    address_len_limit = builder.getInt64(kAddressStructSizeLimit);
-
-  } else {
-    StringError::create("Invalid `address_len` type size");
+  if (address_len_type_size != 4U && address_len_type_size != 8U) {
+    return StringError::create("Invalid `address_len` type size");
   }
 
   auto address_len_condition =
-      builder.CreateICmpUGT(address_len, builder.getInt64(256U));
+      builder.CreateICmpUGT(address_len, address_len_limit);
 
   auto invalid_address_len_bb =
       llvm::BasicBlock::Create(context, "invalid_address_len", exit_function);
