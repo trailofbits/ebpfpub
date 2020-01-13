@@ -104,7 +104,7 @@ SyscallTracepoint::parseEvents(BufferReader &buffer_reader) const {
       break;
     }
 
-    entry_size -= sizeof(entry_size) + sizeof(event_identifier);
+    entry_size -= 8U;
 
     if (entry_size > buffer_reader.availableBytes()) {
       return StringError::create("Not enough bytes to read the event");
