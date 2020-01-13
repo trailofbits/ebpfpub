@@ -9,7 +9,7 @@ ebpfpub is a Linux library that can be used to record system call activity. It w
 ## How it works
 
 ### Tracepoint events
-Tracing is performed by attaching eBPF programs to the system tracepoints. For each syscall defined on the system, two distinct events are emitted: **enter** and **event**.
+Tracing is performed by attaching eBPF programs to the system tracepoints. For each syscall defined on the system, two distinct events are emitted: **enter** and **exit**.
 
 The **enter** event happens as soon as the syscall is called, and carries all the parameters that have been passed from user mode. It does not contain the exit code, and all the **out** buffers are yet to be filled.
 
