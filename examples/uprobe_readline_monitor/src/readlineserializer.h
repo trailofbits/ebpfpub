@@ -13,20 +13,20 @@
 #include <ebpfpub/isyscallserializer.h>
 
 namespace tob::ebpfpub {
-class GenericSyscallSerializer final : public ISyscallSerializer {
+class ReadlineSerializer final : public ISyscallSerializer {
 public:
-  GenericSyscallSerializer();
-  virtual ~GenericSyscallSerializer() override;
+  ReadlineSerializer();
+  virtual ~ReadlineSerializer() override;
 
   virtual const std::string &name() const override;
 
   virtual SuccessOrStringError
   generate(const ebpf::Structure &enter_structure,
-           IBPFProgramWriter &bpf_prog_writer) override;
+           BPFProgramWriter &bpf_prog_writer) override;
 
   virtual SuccessOrStringError
-  parseEvents(ISyscallSerializer::Event &event, IBufferReader &buffer_reader,
-              IBufferStorage &buffer_storage) override;
+  parseEvents(IFunctionTracer::Event &event, BufferReader &buffer_reader,
+              BufferStorage &buffer_storage) override;
 
 private:
   struct PrivateData;

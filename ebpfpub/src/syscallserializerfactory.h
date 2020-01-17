@@ -8,8 +8,7 @@
 
 #pragma once
 
-#include "isyscallserializer.h"
-
+#include <ebpfpub/isyscallserializer.h>
 #include <tob/error/error.h>
 
 namespace tob::ebpfpub {

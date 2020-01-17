@@ -6,7 +6,7 @@
   the LICENSE file found in the root directory of this source tree.
 */
 
-#include "connectsyscallserializer.h"
+#include "readlineserializer.h"
 
 #include <iomanip>
 #include <sstream>
@@ -19,22 +19,22 @@ namespace {
 std::uint32_t kAddressStructSizeLimit{512U};
 }
 
-struct ConnectSyscallSerializer::PrivateData final {
+struct ReadlineSerializer::PrivateData final {
   ebpf::Structure enter_structure;
 };
 
-ConnectSyscallSerializer::ConnectSyscallSerializer() : d(new PrivateData) {}
+ReadlineSerializer::ReadlineSerializer() : d(new PrivateData) {}
 
-ConnectSyscallSerializer::~ConnectSyscallSerializer() {}
+ReadlineSerializer::~ReadlineSerializer() {}
 
-const std::string &ConnectSyscallSerializer::name() const {
+const std::string &ReadlineSerializer::name() const {
   static const std::string kSerializerName{"connect"};
   return kSerializerName;
 }
 
 SuccessOrStringError
-ConnectSyscallSerializer::generate(const ebpf::Structure &enter_structure,
-                                   IBPFProgramWriter &bpf_prog_writer) {
+ReadlineSerializer::generate(const ebpf::Structure &enter_structure,
+                             BPFProgramWriter &bpf_prog_writer) {
 
   // Save the enter event structure
   d->enter_structure = enter_structure;
@@ -108,25 +108,25 @@ ConnectSyscallSerializer::generate(const ebpf::Structure &enter_structure,
 }
 
 SuccessOrStringError
-ConnectSyscallSerializer::parseEvents(ISyscallSerializer::Event &event,
-                                      IBufferReader &buffer_reader,
-                                      IBufferStorage &buffer_storage) {
+ReadlineSerializer::parseEvents(IFunctionTracer::Event &event,
+                                BufferReader &buffer_reader,
+                                BufferStorage &buffer_storage) {
 
   // fd
   const auto &fd_field = d->enter_structure.at(5U + 0U);
 
-  ISyscallSerializer::Event::Integer fd_integer;
+  IFunctionTracer::Event::Integer fd_integer;
   fd_integer.is_signed = fd_field.is_signed;
 
   switch (fd_field.size) {
   case 4U: {
-    fd_integer.type = ISyscallSerializer::Event::Integer::Type::Int32;
+    fd_integer.type = IFunctionTracer::Event::Integer::Type::Int32;
     fd_integer.value = buffer_reader.u32();
     break;
   }
 
   case 8U: {
-    fd_integer.type = ISyscallSerializer::Event::Integer::Type::Int64;
+    fd_integer.type = IFunctionTracer::Event::Integer::Type::Int64;
     fd_integer.value = buffer_reader.u64();
     break;
   }
@@ -138,25 +138,25 @@ ConnectSyscallSerializer::parseEvents(ISyscallSerializer::Event &event,
   }
 
   // sockaddr buffer ptr
-  ISyscallSerializer::Event::Integer sockaddr_integer;
-  sockaddr_integer.type = ISyscallSerializer::Event::Integer::Type::Int64;
+  IFunctionTracer::Event::Integer sockaddr_integer;
+  sockaddr_integer.type = IFunctionTracer::Event::Integer::Type::Int64;
   sockaddr_integer.value = buffer_reader.u64();
 
   // addrlen
   auto addrlen_field = d->enter_structure.at(5U + 2U);
 
-  ISyscallSerializer::Event::Integer addrlen_integer;
+  IFunctionTracer::Event::Integer addrlen_integer;
   addrlen_integer.is_signed = addrlen_field.is_signed;
 
   switch (addrlen_field.size) {
   case 4U: {
-    addrlen_integer.type = ISyscallSerializer::Event::Integer::Type::Int32;
+    addrlen_integer.type = IFunctionTracer::Event::Integer::Type::Int32;
     addrlen_integer.value = buffer_reader.u32();
     break;
   }
 
   case 8U: {
-    addrlen_integer.type = ISyscallSerializer::Event::Integer::Type::Int64;
+    addrlen_integer.type = IFunctionTracer::Event::Integer::Type::Int64;
     addrlen_integer.value = buffer_reader.u64();
     break;
   }

@@ -1,15 +1,24 @@
-cmake_minimum_required(VERSION 3.15.5)
+#
+# Copyright (c) 2019-present, Trail of Bits, Inc.
+# All rights reserved.
+#
+# This source code is licensed in accordance with the terms specified in
+# the LICENSE file found in the root directory of this source tree.
+#
+
+cmake_minimum_required(VERSION 3.16.3)
 
 function(ebpfpub)
   add_library(ebpfpub
+    include/ebpfpub/ibpfprogramwriter.h
     include/ebpfpub/ibufferstorage.h
-    include/ebpfpub/isyscalltracepoint.h
+    include/ebpfpub/ifunctiontracer.h
     include/ebpfpub/iperfeventreader.h
+    include/ebpfpub/isyscallserializer.h
+    include/ebpfpub/ibufferreader.h
 
     src/bpfprogramwriter.h
     src/bpfprogramwriter.cpp
-
-    src/isyscallserializer.h
 
     src/syscallserializerfactory.h
     src/syscallserializerfactory.cpp
@@ -20,20 +29,20 @@ function(ebpfpub)
     src/connectsyscallserializer.h
     src/connectsyscallserializer.cpp
 
-    src/bpfprogramresources.h
-    src/bpfprogramresources.cpp
-
     src/perfeventreader.h
     src/perfeventreader.cpp
 
     src/bufferstorage.h
     src/bufferstorage.cpp
 
-    src/syscalltracepoint.h
-    src/syscalltracepoint.cpp
+    src/functiontracer.h
+    src/functiontracer.cpp
 
     src/bufferreader.h
     src/bufferreader.cpp
+
+    src/abi.h
+    src/abi.cpp
   )
 
   target_include_directories(ebpfpub

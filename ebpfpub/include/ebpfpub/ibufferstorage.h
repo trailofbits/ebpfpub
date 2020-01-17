@@ -11,6 +11,7 @@
 #include <memory>
 #include <unordered_map>
 
+#include <tob/ebpf/bpfmap.h>
 #include <tob/error/error.h>
 
 namespace tob::ebpfpub {
@@ -26,6 +27,12 @@ public:
   virtual std::size_t memoryUsage() const = 0;
   virtual std::size_t bufferSize() const = 0;
   virtual std::size_t bufferCount() const = 0;
+
+  virtual int bufferMap() const = 0;
+  virtual int indexMap() const = 0;
+
+  virtual ebpf::BPFMapErrorCode getBuffer(std::vector<std::uint8_t> &value,
+                                          std::uint64_t index) = 0;
 
   IBufferStorage(const IBufferStorage &) = delete;
   IBufferStorage &operator=(const IBufferStorage &) = delete;

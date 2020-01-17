@@ -14,12 +14,11 @@ namespace tob::ebpfpub {
 class PerfEventReader final : public IPerfEventReader {
 public:
   virtual ~PerfEventReader() override;
-
-  virtual void insert(ISyscallTracepoint::Ref syscall_tracepoint) override;
+  virtual void insert(IFunctionTracer::Ref syscall_tracepoint) override;
 
   virtual SuccessOrStringError
   exec(std::atomic_bool &terminate,
-       void (*callback)(const ISyscallTracepoint::EventList &)) override;
+       void (*callback)(const ISyscallSerializer::EventList &)) override;
 
 protected:
   PerfEventReader(ebpf::PerfEventArray &perf_event_array,

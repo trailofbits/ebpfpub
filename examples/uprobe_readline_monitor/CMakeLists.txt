@@ -7,27 +7,17 @@
 #
 
 cmake_minimum_required(VERSION 3.15.5)
-project("ebpftracer")
+project("uprobe_readline_monitor")
 
-function(ebpfpubToolsEbpftracer)
-  add_executable(ebpftracer
+function(ebpfpubExamplesUprobeReadlineMonitor)
+  add_executable(uprobe_readline_monitor
     src/main.cpp
-
-    src/configuration.h
-    src/configuration.cpp
-
-    src/utils.h
-    src/utils.cpp
   )
 
-  target_link_libraries(ebpftracer PRIVATE
+  target_link_libraries(uprobe_readline_monitor PRIVATE
     ebpfpub
     thirdparty_cli11
   )
-
-  if(EBPFPUB_ENABLE_INSTALL)
-    install(TARGETS "ebpftracer" DESTINATION "bin")
-  endif()
 endfunction()
 
-ebpfpubToolsEbpftracer()
+ebpfpubExamplesUprobeReadlineMonitor()

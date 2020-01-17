@@ -8,7 +8,6 @@
 
 namespace tob::ebpfpub {
 struct UserSettings final {
-  bool verbose_flag{false};
   std::vector<std::string> tracepoint_list;
   std::size_t buffer_size{4096};
   std::size_t buffer_count{4096};
