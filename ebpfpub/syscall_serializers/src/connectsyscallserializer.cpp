@@ -6,13 +6,13 @@
   the LICENSE file found in the root directory of this source tree.
 */
 
-#include "connectsyscallserializer.h"
-
 #include <iomanip>
 #include <sstream>
 
 #include <netinet/in.h>
 #include <sys/un.h>
+
+#include <ebpfpub/serializers/connectsyscallserializer.h>
 
 namespace tob::ebpfpub {
 namespace {
@@ -108,25 +108,25 @@ ConnectSyscallSerializer::generate(const ebpf::Structure &enter_structure,
 }
 
 SuccessOrStringError
-ConnectSyscallSerializer::parseEvents(ISyscallSerializer::Event &event,
+ConnectSyscallSerializer::parseEvents(IFunctionSerializer::Event &event,
                                       IBufferReader &buffer_reader,
                                       IBufferStorage &buffer_storage) {
 
   // fd
   const auto &fd_field = d->enter_structure.at(5U + 0U);
 
-  ISyscallSerializer::Event::Integer fd_integer;
+  IFunctionSerializer::Event::Integer fd_integer;
   fd_integer.is_signed = fd_field.is_signed;
 
   switch (fd_field.size) {
   case 4U: {
-    fd_integer.type = ISyscallSerializer::Event::Integer::Type::Int32;
+    fd_integer.type = IFunctionSerializer::Event::Integer::Type::Int32;
     fd_integer.value = buffer_reader.u32();
     break;
   }
 
   case 8U: {
-    fd_integer.type = ISyscallSerializer::Event::Integer::Type::Int64;
+    fd_integer.type = IFunctionSerializer::Event::Integer::Type::Int64;
     fd_integer.value = buffer_reader.u64();
     break;
   }
@@ -138,25 +138,25 @@ ConnectSyscallSerializer::parseEvents(ISyscallSerializer::Event &event,
   }
 
   // sockaddr buffer ptr
-  ISyscallSerializer::Event::Integer sockaddr_integer;
-  sockaddr_integer.type = ISyscallSerializer::Event::Integer::Type::Int64;
+  IFunctionSerializer::Event::Integer sockaddr_integer;
+  sockaddr_integer.type = IFunctionSerializer::Event::Integer::Type::Int64;
   sockaddr_integer.value = buffer_reader.u64();
 
   // addrlen
   auto addrlen_field = d->enter_structure.at(5U + 2U);
 
-  ISyscallSerializer::Event::Integer addrlen_integer;
+  IFunctionSerializer::Event::Integer addrlen_integer;
   addrlen_integer.is_signed = addrlen_field.is_signed;
 
   switch (addrlen_field.size) {
   case 4U: {
-    addrlen_integer.type = ISyscallSerializer::Event::Integer::Type::Int32;
+    addrlen_integer.type = IFunctionSerializer::Event::Integer::Type::Int32;
     addrlen_integer.value = buffer_reader.u32();
     break;
   }
 
   case 8U: {
-    addrlen_integer.type = ISyscallSerializer::Event::Integer::Type::Int64;
+    addrlen_integer.type = IFunctionSerializer::Event::Integer::Type::Int64;
     addrlen_integer.value = buffer_reader.u64();
     break;
   }

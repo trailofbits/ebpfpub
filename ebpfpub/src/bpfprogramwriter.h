@@ -22,6 +22,23 @@
 namespace tob::ebpfpub {
 class BPFProgramWriter final : public IBPFProgramWriter {
 public:
+  using EventMap = ebpf::BPFMap<BPF_MAP_TYPE_HASH, std::uint64_t>;
+  using StackMap = ebpf::BPFMap<BPF_MAP_TYPE_PERCPU_ARRAY, std::uint32_t>;
+
+  struct ProgramResources final {
+    StackMap::Ref event_stack_map;
+    StackMap::Ref buffer_stack_map;
+    EventMap::Ref event_map;
+  };
+
+  using Ref = std::unique_ptr<IBPFProgramWriter>;
+
+  static StringErrorOr<Ref> create(llvm::Module &module,
+                                   IBufferStorage &buffer_storage,
+                                   const ebpf::Structure &enter_structure,
+                                   const ebpf::Structure &exit_structure,
+                                   ProgramType program_type);
+
   virtual ~BPFProgramWriter() override;
 
   virtual llvm::IRBuilder<> &builder() override;
@@ -31,7 +48,6 @@ public:
   virtual llvm::LLVMContext &context() override;
   virtual ProgramType programType() const override;
 
-  virtual StringErrorOr<llvm::Function *> getEnterFunction() override;
   virtual StringErrorOr<llvm::Function *> getExitFunction() override;
   virtual StringErrorOr<llvm::Type *> getEventEntryType() override;
 
@@ -42,6 +58,7 @@ public:
   virtual SuccessOrStringError captureBuffer(llvm::Value *buffer_pointer,
                                              llvm::Value *buffer_size) override;
 
+  StringErrorOr<llvm::Function *> getEnterFunction();
   StringErrorOr<ProgramResources> initializeProgram(std::size_t event_map_size);
 
   void setValue(const std::string &name, llvm::Value *value);
@@ -69,7 +86,5 @@ private:
   StringErrorOr<llvm::StructType *>
   importTracepointDescriptorStructure(const ebpf::Structure &structure,
                                       const std::string &name);
-
-  friend class IBPFProgramWriter;
 };
 } // namespace tob::ebpfpub

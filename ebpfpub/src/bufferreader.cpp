@@ -37,6 +37,19 @@ struct BufferReader::PrivateData final {
   std::size_t bytes_read{0U};
 };
 
+StringErrorOr<BufferReader::Ref>
+BufferReader::create(const std::uint8_t *buffer, std::size_t buffer_size) {
+  try {
+    return Ref(new BufferReader(buffer, buffer_size));
+
+  } catch (const std::bad_alloc &) {
+    return StringError::create("Memory allocation failure");
+
+  } catch (const StringError &error) {
+    return error;
+  }
+}
+
 BufferReader::~BufferReader() {}
 
 std::size_t BufferReader::offset() const { return d->bytes_read; }
@@ -93,18 +106,5 @@ BufferReader::BufferReader(const std::uint8_t *buffer, std::size_t buffer_size)
     : d(new PrivateData) {
   d->buffer = buffer;
   d->buffer_size = buffer_size;
-}
-
-StringErrorOr<IBufferReader::Ref>
-IBufferReader::create(const std::uint8_t *buffer, std::size_t buffer_size) {
-  try {
-    return Ref(new BufferReader(buffer, buffer_size));
-
-  } catch (const std::bad_alloc &) {
-    return StringError::create("Memory allocation failure");
-
-  } catch (const StringError &error) {
-    return error;
-  }
 }
 } // namespace tob::ebpfpub

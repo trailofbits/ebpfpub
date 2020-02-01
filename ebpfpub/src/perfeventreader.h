@@ -18,7 +18,7 @@ public:
 
   virtual SuccessOrStringError
   exec(std::atomic_bool &terminate,
-       void (*callback)(const ISyscallSerializer::EventList &)) override;
+       void (*callback)(const IFunctionSerializer::EventList &)) override;
 
 protected:
   PerfEventReader(ebpf::PerfEventArray &perf_event_array,

@@ -12,8 +12,8 @@
 #include <memory>
 
 #include <ebpfpub/ibufferstorage.h>
+#include <ebpfpub/ifunctionserializer.h>
 #include <ebpfpub/ifunctiontracer.h>
-#include <ebpfpub/isyscallserializer.h>
 
 #include <tob/ebpf/perfeventarray.h>
 
@@ -32,7 +32,7 @@ public:
 
   virtual SuccessOrStringError
   exec(std::atomic_bool &terminate,
-       void (*callback)(const ISyscallSerializer::EventList &)) = 0;
+       void (*callback)(const IFunctionSerializer::EventList &)) = 0;
 
   IPerfEventReader(const IPerfEventReader &) = delete;
   IPerfEventReader &operator=(const IPerfEventReader &) = delete;

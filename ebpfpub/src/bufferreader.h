@@ -16,6 +16,10 @@
 namespace tob::ebpfpub {
 class BufferReader final : public IBufferReader {
 public:
+  using Ref = std::unique_ptr<IBufferReader>;
+  static StringErrorOr<Ref> create(const std::uint8_t *buffer,
+                                   std::size_t buffer_size);
+
   virtual ~BufferReader() override;
 
   virtual std::size_t offset() const override;
@@ -40,7 +44,5 @@ private:
   std::unique_ptr<PrivateData> d;
 
   BufferReader(const std::uint8_t *buffer, std::size_t buffer_size);
-
-  friend class IBufferReader;
 };
 } // namespace tob::ebpfpub

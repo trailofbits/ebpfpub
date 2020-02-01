@@ -15,7 +15,7 @@
 #include <vector>
 
 #include <ebpfpub/ibufferstorage.h>
-#include <ebpfpub/isyscallserializer.h>
+#include <ebpfpub/ifunctionserializer.h>
 
 #include <tob/ebpf/perfeventarray.h>
 #include <tob/ebpf/structure.h>
@@ -29,18 +29,17 @@ public:
       const std::string &name, IBufferStorage &buffer_storage,
       ebpf::PerfEventArray &perf_event_array, std::size_t event_map_size);
 
-  static StringErrorOr<IFunctionTracer::Ref>
-  createFromKprobe(const std::string &name, std::uint32_t identifier,
-                   const ebpf::Structure &args, IBufferStorage &buffer_storage,
-                   ebpf::PerfEventArray &perf_event_array,
-                   std::size_t event_map_size);
+  static StringErrorOr<IFunctionTracer::Ref> createFromKprobe(
+      const std::string &name, const ebpf::Structure &args,
+      IBufferStorage &buffer_storage, ebpf::PerfEventArray &perf_event_array,
+      std::size_t event_map_size, IFunctionSerializer::Ref serializer);
 
   static StringErrorOr<IFunctionTracer::Ref>
   createFromUprobe(const std::string &name, const std::string &path,
-                   std::uint32_t identifier, const ebpf::Structure &args,
-                   IBufferStorage &buffer_storage,
+                   const ebpf::Structure &args, IBufferStorage &buffer_storage,
                    ebpf::PerfEventArray &perf_event_array,
-                   std::size_t event_map_size);
+                   std::size_t event_map_size,
+                   IFunctionSerializer::Ref serializer);
 
   IFunctionTracer() = default;
   virtual ~IFunctionTracer() = default;

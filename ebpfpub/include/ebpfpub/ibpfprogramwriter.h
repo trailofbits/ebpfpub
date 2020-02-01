@@ -20,23 +20,7 @@
 namespace tob::ebpfpub {
 class IBPFProgramWriter {
 public:
-  using Ref = std::unique_ptr<IBPFProgramWriter>;
-  using EventMap = ebpf::BPFMap<BPF_MAP_TYPE_HASH, std::uint64_t>;
-  using StackMap = ebpf::BPFMap<BPF_MAP_TYPE_PERCPU_ARRAY, std::uint32_t>;
-
-  struct ProgramResources final {
-    StackMap::Ref event_stack_map;
-    StackMap::Ref buffer_stack_map;
-    EventMap::Ref event_map;
-  };
-
   enum class ProgramType { Tracepoint, Kprobe, Uprobe };
-
-  static StringErrorOr<Ref> create(llvm::Module &module,
-                                   IBufferStorage &buffer_storage,
-                                   const ebpf::Structure &enter_structure,
-                                   const ebpf::Structure &exit_structure,
-                                   ProgramType program_type);
 
   IBPFProgramWriter() = default;
   virtual ~IBPFProgramWriter() = default;
@@ -48,7 +32,6 @@ public:
   virtual llvm::LLVMContext &context() = 0;
   virtual ProgramType programType() const = 0;
 
-  virtual StringErrorOr<llvm::Function *> getEnterFunction() = 0;
   virtual StringErrorOr<llvm::Function *> getExitFunction() = 0;
   virtual StringErrorOr<llvm::Type *> getEventEntryType() = 0;
 

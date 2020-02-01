@@ -10,6 +10,8 @@
 #include "abi.h"
 #include "syscallserializerfactory.h"
 
+#include <atomic>
+
 #include <llvm/IR/Verifier.h>
 
 #include <tob/ebpf/ebpf_utils.h>
@@ -35,6 +37,11 @@ void initializeSerializerFactoryHelper() {
     throw serializers_initialized_exp.error();
   }
 }
+
+std::uint32_t generateKprobeIdentifier() {
+  static std::atomic_uint32_t identifier_generator{0U};
+  return ++identifier_generator;
+}
 } // namespace
 
 struct FunctionTracer::PrivateData final {
@@ -43,7 +50,7 @@ struct FunctionTracer::PrivateData final {
       : buffer_storage(buffer_storage_), perf_event_array(perf_event_array_) {}
 
   EventData event_data;
-  ISyscallSerializer::Ref serializer;
+  IFunctionSerializer::Ref serializer;
 
   std::size_t event_map_size;
   IBufferStorage &buffer_storage;
@@ -66,9 +73,9 @@ std::uint32_t FunctionTracer::eventIdentifier() const {
   return d->event_data.enter_event->identifier();
 }
 
-StringErrorOr<ISyscallSerializer::EventList>
+StringErrorOr<IFunctionSerializer::EventList>
 FunctionTracer::parseEvents(IBufferReader &buffer_reader) const {
-  ISyscallSerializer::EventList event_list;
+  IFunctionSerializer::EventList event_list;
 
   auto &buffer_storage_impl = static_cast<BufferStorage &>(d->buffer_storage);
 
@@ -91,7 +98,7 @@ FunctionTracer::parseEvents(IBufferReader &buffer_reader) const {
 
     buffer_reader.skipBytes(8U);
 
-    ISyscallSerializer::Event event = {};
+    IFunctionSerializer::Event event = {};
     event.name = d->event_data.name;
 
     event.header.timestamp = buffer_reader.u64();
@@ -124,7 +131,7 @@ FunctionTracer::parseEvents(IBufferReader &buffer_reader) const {
 }
 
 FunctionTracer::FunctionTracer(EventData event_data,
-                               ISyscallSerializer::Ref serializer,
+                               IFunctionSerializer::Ref serializer,
                                std::size_t event_map_size,
                                IBufferStorage &buffer_storage,
                                ebpf::PerfEventArray &perf_event_array)
@@ -807,11 +814,11 @@ IFunctionTracer::createFromSyscallTracepoint(
     throw serializer_ref_exp.error();
   }
 
-  auto syscall_serializer = serializer_ref_exp.takeValue();
+  auto serializer_ref = serializer_ref_exp.takeValue();
 
   try {
     return Ref(new FunctionTracer(std::move(event_data),
-                                  std::move(syscall_serializer), event_map_size,
+                                  std::move(serializer_ref), event_map_size,
                                   buffer_storage, perf_event_array));
 
   } catch (const std::bad_alloc &) {
@@ -823,16 +830,16 @@ IFunctionTracer::createFromSyscallTracepoint(
 }
 
 StringErrorOr<IFunctionTracer::Ref> IFunctionTracer::createFromKprobe(
-    const std::string &name, std::uint32_t identifier,
-    const ebpf::Structure &args, IBufferStorage &buffer_storage,
-    ebpf::PerfEventArray &perf_event_array, std::size_t event_map_size) {
-
-  initializeSerializerFactoryHelper();
+    const std::string &name, const ebpf::Structure &args,
+    IBufferStorage &buffer_storage, ebpf::PerfEventArray &perf_event_array,
+    std::size_t event_map_size, IFunctionSerializer::Ref serializer) {
 
   FunctionTracer::EventData event_data;
   event_data.program_type = BPFProgramWriter::ProgramType::Kprobe;
   event_data.name = name;
   event_data.enter_structure = args;
+
+  auto identifier = generateKprobeIdentifier();
 
   auto event_exp = ebpf::IPerfEvent::createKprobe(name, false, identifier);
   if (!event_exp.succeeded()) {
@@ -848,18 +855,10 @@ StringErrorOr<IFunctionTracer::Ref> IFunctionTracer::createFromKprobe(
 
   event_data.exit_event = event_exp.takeValue();
 
-  // Use the generic syscall serializer
-  auto serializer_ref_exp = createSerializer("generic");
-  if (!serializer_ref_exp.succeeded()) {
-    throw serializer_ref_exp.error();
-  }
-
-  auto syscall_serializer = serializer_ref_exp.takeValue();
-
   try {
-    return Ref(new FunctionTracer(std::move(event_data),
-                                  std::move(syscall_serializer), event_map_size,
-                                  buffer_storage, perf_event_array));
+    return Ref(new FunctionTracer(std::move(event_data), std::move(serializer),
+                                  event_map_size, buffer_storage,
+                                  perf_event_array));
 
   } catch (const std::bad_alloc &) {
     return StringError::create("Memory allocation failure");
@@ -870,9 +869,10 @@ StringErrorOr<IFunctionTracer::Ref> IFunctionTracer::createFromKprobe(
 }
 
 StringErrorOr<IFunctionTracer::Ref> IFunctionTracer::createFromUprobe(
-    const std::string &name, const std::string &path, std::uint32_t identifier,
+    const std::string &name, const std::string &path,
     const ebpf::Structure &args, IBufferStorage &buffer_storage,
-    ebpf::PerfEventArray &perf_event_array, std::size_t event_map_size) {
+    ebpf::PerfEventArray &perf_event_array, std::size_t event_map_size,
+    IFunctionSerializer::Ref serializer) {
 
   initializeSerializerFactoryHelper();
 
@@ -880,6 +880,8 @@ StringErrorOr<IFunctionTracer::Ref> IFunctionTracer::createFromUprobe(
   event_data.program_type = BPFProgramWriter::ProgramType::Uprobe;
   event_data.name = name;
   event_data.enter_structure = args;
+
+  auto identifier = generateKprobeIdentifier();
 
   auto event_exp =
       ebpf::IPerfEvent::createUprobe(name, path, false, identifier);
@@ -897,18 +899,10 @@ StringErrorOr<IFunctionTracer::Ref> IFunctionTracer::createFromUprobe(
 
   event_data.exit_event = event_exp.takeValue();
 
-  // Use the generic syscall serializer
-  auto serializer_ref_exp = createSerializer("generic");
-  if (!serializer_ref_exp.succeeded()) {
-    throw serializer_ref_exp.error();
-  }
-
-  auto syscall_serializer = serializer_ref_exp.takeValue();
-
   try {
-    return Ref(new FunctionTracer(std::move(event_data),
-                                  std::move(syscall_serializer), event_map_size,
-                                  buffer_storage, perf_event_array));
+    return Ref(new FunctionTracer(std::move(event_data), std::move(serializer),
+                                  event_map_size, buffer_storage,
+                                  perf_event_array));
 
   } catch (const std::bad_alloc &) {
     return StringError::create("Memory allocation failure");

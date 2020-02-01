@@ -24,7 +24,7 @@ void signalHandler(int signal) {
 }
 
 void printEventHeader(
-    const tob::ebpfpub::ISyscallSerializer::Event::Header &header) {
+    const tob::ebpfpub::IFunctionSerializer::Event::Header &header) {
   std::cout << "timestamp: " << header.timestamp << " ";
 
   std::cout << "process_id: " << header.process_id << " ";
@@ -38,7 +38,7 @@ void printEventHeader(
 }
 
 void printEventOptionalVariant(
-    const tob::ebpfpub::ISyscallSerializer::Event::OptionalVariant
+    const tob::ebpfpub::IFunctionSerializer::Event::OptionalVariant
         &opt_variant) {
   if (!opt_variant.has_value()) {
     std::cout << "<NULL>";
@@ -58,10 +58,10 @@ void printEventOptionalVariant(
     std::cout << "<buffer of " << value.size() << " bytes";
 
   } else if (std::holds_alternative<
-                 tob::ebpfpub::ISyscallSerializer::Event::Integer>(variant)) {
+                 tob::ebpfpub::IFunctionSerializer::Event::Integer>(variant)) {
 
     const auto &integer =
-        std::get<tob::ebpfpub::ISyscallSerializer::Event::Integer>(variant);
+        std::get<tob::ebpfpub::IFunctionSerializer::Event::Integer>(variant);
 
     if (integer.is_signed) {
       std::cout << static_cast<int>(integer.value);
@@ -74,7 +74,7 @@ void printEventOptionalVariant(
   }
 }
 
-void printEvent(const tob::ebpfpub::ISyscallSerializer::Event &event) {
+void printEvent(const tob::ebpfpub::IFunctionSerializer::Event &event) {
   printEventHeader(event.header);
 
   std::cout << "syscall: " << event.name << " ";
@@ -193,7 +193,7 @@ int main(int argc, char *argv[]) {
   auto success_exp = perf_event_reader->exec(
     terminate,
 
-    [](const tob::ebpfpub::ISyscallSerializer::EventList &event_list) -> void {
+    [](const tob::ebpfpub::IFunctionSerializer::EventList &event_list) -> void {
       for (const auto &event : event_list) {
         printEvent(event);
       }

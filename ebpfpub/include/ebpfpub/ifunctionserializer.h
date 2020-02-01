@@ -13,7 +13,7 @@
 #include <ebpfpub/ibufferstorage.h>
 
 namespace tob::ebpfpub {
-class ISyscallSerializer {
+class IFunctionSerializer {
 public:
   struct Event final {
     struct Header final {
@@ -51,11 +51,11 @@ public:
 
   using EventList = std::vector<Event>;
 
-  using Ref = std::unique_ptr<ISyscallSerializer>;
+  using Ref = std::unique_ptr<IFunctionSerializer>;
   using Factory = StringErrorOr<Ref> (*)();
 
-  ISyscallSerializer() = default;
-  virtual ~ISyscallSerializer() = default;
+  IFunctionSerializer() = default;
+  virtual ~IFunctionSerializer() = default;
 
   virtual const std::string &name() const = 0;
 
@@ -66,7 +66,7 @@ public:
                                            IBufferReader &buffer_reader,
                                            IBufferStorage &buffer_storage) = 0;
 
-  ISyscallSerializer(const ISyscallSerializer &) = delete;
-  ISyscallSerializer &operator=(const ISyscallSerializer &) = delete;
+  IFunctionSerializer(const IFunctionSerializer &) = delete;
+  IFunctionSerializer &operator=(const IFunctionSerializer &) = delete;
 };
 } // namespace tob::ebpfpub

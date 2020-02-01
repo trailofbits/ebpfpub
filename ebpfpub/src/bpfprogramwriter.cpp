@@ -69,6 +69,24 @@ struct BPFProgramWriter::PrivateData final {
   std::unordered_map<std::string, llvm::Value *> saved_value_map;
 };
 
+StringErrorOr<BPFProgramWriter::Ref>
+BPFProgramWriter::create(llvm::Module &module, IBufferStorage &buffer_storage,
+                         const ebpf::Structure &enter_structure,
+                         const ebpf::Structure &exit_structure,
+                         ProgramType program_type) {
+
+  try {
+    return Ref(new BPFProgramWriter(module, buffer_storage, enter_structure,
+                                    exit_structure, program_type));
+
+  } catch (const std::bad_alloc &) {
+    return StringError::create("Memory allocation failure");
+
+  } catch (const StringError &error) {
+    return error;
+  }
+}
+
 BPFProgramWriter::~BPFProgramWriter() {}
 
 llvm::IRBuilder<> &BPFProgramWriter::builder() { return d->builder; }
@@ -83,15 +101,6 @@ llvm::LLVMContext &BPFProgramWriter::context() { return d->context; }
 
 BPFProgramWriter::ProgramType BPFProgramWriter::programType() const {
   return d->program_type;
-}
-
-StringErrorOr<llvm::Function *> BPFProgramWriter::getEnterFunction() {
-  auto function = module().getFunction("on_syscall_enter");
-  if (function == nullptr) {
-    return StringError::create("The program has not been initialized");
-  }
-
-  return function;
 }
 
 StringErrorOr<llvm::Function *> BPFProgramWriter::getExitFunction() {
@@ -208,11 +217,10 @@ BPFProgramWriter::captureString(llvm::Value *string_pointer) {
 
   auto marked_index = marked_index_exp.takeValue();
 
-  marked_index =
-      builder().CreateIntToPtr(marked_index, builder().getInt8PtrTy());
+  marked_index = builder().CreateIntToPtr(
+      marked_index, string_pointer->getType()->getPointerElementType());
 
   builder().CreateStore(marked_index, string_pointer);
-
   return {};
 }
 
@@ -309,6 +317,15 @@ BPFProgramWriter::captureBuffer(llvm::Value *buffer_pointer,
   builder().CreateStore(marked_index, buffer_pointer);
 
   return {};
+}
+
+StringErrorOr<llvm::Function *> BPFProgramWriter::getEnterFunction() {
+  auto function = module().getFunction("on_syscall_enter");
+  if (function == nullptr) {
+    return StringError::create("The program has not been initialized");
+  }
+
+  return function;
 }
 
 StringErrorOr<BPFProgramWriter::ProgramResources>
@@ -659,23 +676,5 @@ BPFProgramWriter::markBufferStorageIndex(llvm::Value *buffer_storage_index) {
       llvm::Instruction::Or, marked_buffer_index, current_processor_id);
 
   return marked_buffer_index;
-}
-
-StringErrorOr<IBPFProgramWriter::Ref>
-IBPFProgramWriter::create(llvm::Module &module, IBufferStorage &buffer_storage,
-                          const ebpf::Structure &enter_structure,
-                          const ebpf::Structure &exit_structure,
-                          ProgramType program_type) {
-
-  try {
-    return Ref(new BPFProgramWriter(module, buffer_storage, enter_structure,
-                                    exit_structure, program_type));
-
-  } catch (const std::bad_alloc &) {
-    return StringError::create("Memory allocation failure");
-
-  } catch (const StringError &error) {
-    return error;
-  }
 }
 } // namespace tob::ebpfpub

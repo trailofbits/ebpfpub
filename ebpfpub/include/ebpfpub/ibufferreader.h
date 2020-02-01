@@ -16,10 +16,6 @@
 namespace tob::ebpfpub {
 class IBufferReader {
 public:
-  using Ref = std::unique_ptr<IBufferReader>;
-  static StringErrorOr<Ref> create(const std::uint8_t *buffer,
-                                   std::size_t buffer_size);
-
   IBufferReader() = default;
   virtual ~IBufferReader() = default;
 

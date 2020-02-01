@@ -9,12 +9,14 @@
 cmake_minimum_required(VERSION 3.16.3)
 
 function(ebpfpub)
+  add_subdirectory("syscall_serializers")
+
   add_library(ebpfpub
     include/ebpfpub/ibpfprogramwriter.h
     include/ebpfpub/ibufferstorage.h
     include/ebpfpub/ifunctiontracer.h
     include/ebpfpub/iperfeventreader.h
-    include/ebpfpub/isyscallserializer.h
+    include/ebpfpub/ifunctionserializer.h
     include/ebpfpub/ibufferreader.h
 
     src/bpfprogramwriter.h
@@ -22,12 +24,6 @@ function(ebpfpub)
 
     src/syscallserializerfactory.h
     src/syscallserializerfactory.cpp
-
-    src/genericsyscallserializer.h
-    src/genericsyscallserializer.cpp
-
-    src/connectsyscallserializer.h
-    src/connectsyscallserializer.cpp
 
     src/perfeventreader.h
     src/perfeventreader.cpp
@@ -47,13 +43,18 @@ function(ebpfpub)
 
   target_include_directories(ebpfpub
     PRIVATE include
+  )
+
+  target_include_directories(ebpfpub
     SYSTEM INTERFACE include
   )
+
 
   target_link_libraries(ebpfpub PUBLIC
     ebpf
     error
     utils
+    syscall_serializers
   )
 
   target_compile_definitions(ebpfpub PUBLIC

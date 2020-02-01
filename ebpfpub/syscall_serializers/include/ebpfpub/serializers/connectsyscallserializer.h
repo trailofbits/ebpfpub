@@ -10,13 +10,13 @@
 
 #include <memory>
 
-#include <ebpfpub/isyscallserializer.h>
+#include <ebpfpub/ifunctionserializer.h>
 
 namespace tob::ebpfpub {
-class GenericSyscallSerializer final : public ISyscallSerializer {
+class ConnectSyscallSerializer final : public IFunctionSerializer {
 public:
-  GenericSyscallSerializer();
-  virtual ~GenericSyscallSerializer() override;
+  ConnectSyscallSerializer();
+  virtual ~ConnectSyscallSerializer() override;
 
   virtual const std::string &name() const override;
 
@@ -25,7 +25,7 @@ public:
            IBPFProgramWriter &bpf_prog_writer) override;
 
   virtual SuccessOrStringError
-  parseEvents(ISyscallSerializer::Event &event, IBufferReader &buffer_reader,
+  parseEvents(IFunctionSerializer::Event &event, IBufferReader &buffer_reader,
               IBufferStorage &buffer_storage) override;
 
 private:

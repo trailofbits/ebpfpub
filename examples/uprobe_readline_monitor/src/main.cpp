@@ -1,3 +1,5 @@
+#include "readlineserializer.h"
+
 #include <atomic>
 #include <cstring>
 #include <iostream>
@@ -33,7 +35,7 @@ void setRlimit() {
 }
 
 void printEventHeader(
-    const tob::ebpfpub::ISyscallSerializer::Event::Header &header) {
+    const tob::ebpfpub::IFunctionSerializer::Event::Header &header) {
   std::cout << "timestamp: " << header.timestamp << " ";
 
   std::cout << "process_id: " << header.process_id << " ";
@@ -47,8 +49,9 @@ void printEventHeader(
 }
 
 void printEventOptionalVariant(
-    const tob::ebpfpub::ISyscallSerializer::Event::OptionalVariant
+    const tob::ebpfpub::IFunctionSerializer::Event::OptionalVariant
         &opt_variant) {
+
   if (!opt_variant.has_value()) {
     std::cout << "<NULL>";
     return;
@@ -64,13 +67,13 @@ void printEventOptionalVariant(
 
     const auto &value = std::get<std::vector<std::uint8_t>>(variant);
 
-    std::cout << "<buffer of " << value.size() << " bytes";
+    std::cout << "<buffer of " << value.size() << " bytes>";
 
   } else if (std::holds_alternative<
-                 tob::ebpfpub::ISyscallSerializer::Event::Integer>(variant)) {
+                 tob::ebpfpub::IFunctionSerializer::Event::Integer>(variant)) {
 
     const auto &integer =
-        std::get<tob::ebpfpub::ISyscallSerializer::Event::Integer>(variant);
+        std::get<tob::ebpfpub::IFunctionSerializer::Event::Integer>(variant);
 
     if (integer.is_signed) {
       std::cout << static_cast<int>(integer.value);
@@ -83,7 +86,7 @@ void printEventOptionalVariant(
   }
 }
 
-void printEvent(const tob::ebpfpub::ISyscallSerializer::Event &event) {
+void printEvent(const tob::ebpfpub::IFunctionSerializer::Event &event) {
   printEventHeader(event.header);
 
   std::cout << "syscall: " << event.name << " ";
@@ -155,9 +158,20 @@ int main(int argc, char *argv[]) {
   const tob::ebpf::Structure readline_argument_list = {
       {"const char *", "prompt", 0U, 8U, false}};
 
+  auto serializer_exp = tob::ebpfpub::ReadlineSerializer::create();
+  if (!serializer_exp.succeeded()) {
+    const auto &error = serializer_exp.error();
+    std::cerr << error.message() << "\n";
+
+    return 1;
+  }
+
+  auto serializer = serializer_exp.takeValue();
+
   auto function_tracer_exp = tob::ebpfpub::IFunctionTracer::createFromUprobe(
-      "readline", "/usr/lib/libreadline.so.8.0", 10U, readline_argument_list,
-      *buffer_storage.get(), *perf_event_array.get(), 256U);
+      "readline", "/usr/lib/libreadline.so.8.0", readline_argument_list,
+      *buffer_storage.get(), *perf_event_array.get(), 256U,
+      std::move(serializer));
 
   if (!function_tracer_exp.succeeded()) {
     const auto &error = function_tracer_exp.error();
@@ -175,7 +189,7 @@ int main(int argc, char *argv[]) {
   auto success_exp = perf_event_reader->exec(
     terminate,
 
-    [](const tob::ebpfpub::ISyscallSerializer::EventList &event_list) -> void {
+    [](const tob::ebpfpub::IFunctionSerializer::EventList &event_list) -> void {
       for (const auto &event : event_list) {
         printEvent(event);
       }

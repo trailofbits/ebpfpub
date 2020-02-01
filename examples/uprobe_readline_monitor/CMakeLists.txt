@@ -12,6 +12,9 @@ project("uprobe_readline_monitor")
 function(ebpfpubExamplesUprobeReadlineMonitor)
   add_executable(uprobe_readline_monitor
     src/main.cpp
+
+    src/readlineserializer.h
+    src/readlineserializer.cpp
   )
 
   target_link_libraries(uprobe_readline_monitor PRIVATE

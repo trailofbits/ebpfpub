@@ -36,14 +36,14 @@ public:
   virtual const std::string &name() const override;
   virtual std::uint32_t eventIdentifier() const override;
 
-  StringErrorOr<ISyscallSerializer::EventList>
+  StringErrorOr<IFunctionSerializer::EventList>
   parseEvents(IBufferReader &buffer_reader) const;
 
 private:
   struct PrivateData;
   std::unique_ptr<PrivateData> d;
 
-  FunctionTracer(EventData event_data, ISyscallSerializer::Ref serializer,
+  FunctionTracer(EventData event_data, IFunctionSerializer::Ref serializer,
                  std::size_t event_map_size, IBufferStorage &buffer_storage,
                  ebpf::PerfEventArray &perf_event_array);
 

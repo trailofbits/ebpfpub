@@ -6,9 +6,9 @@
   the LICENSE file found in the root directory of this source tree.
 */
 
-#include "genericsyscallserializer.h"
-
 #include <unordered_set>
+
+#include <ebpfpub/serializers/genericsyscallserializer.h>
 
 namespace tob::ebpfpub {
 namespace {
@@ -145,7 +145,7 @@ GenericSyscallSerializer::generate(const ebpf::Structure &enter_structure,
 }
 
 SuccessOrStringError
-GenericSyscallSerializer::parseEvents(ISyscallSerializer::Event &event,
+GenericSyscallSerializer::parseEvents(IFunctionSerializer::Event &event,
                                       IBufferReader &buffer_reader,
                                       IBufferStorage &buffer_storage) {
 
@@ -161,30 +161,30 @@ GenericSyscallSerializer::parseEvents(ISyscallSerializer::Event &event,
     const auto &param_name = syscall_param.name;
     auto param_is_signed = syscall_param.is_signed;
 
-    ISyscallSerializer::Event::Integer integer;
+    IFunctionSerializer::Event::Integer integer;
     integer.is_signed = param_is_signed;
 
     switch (param_size) {
     case 1U: {
-      integer.type = ISyscallSerializer::Event::Integer::Type::Int8;
+      integer.type = IFunctionSerializer::Event::Integer::Type::Int8;
       integer.value = buffer_reader.u8();
       break;
     }
 
     case 2U: {
-      integer.type = ISyscallSerializer::Event::Integer::Type::Int16;
+      integer.type = IFunctionSerializer::Event::Integer::Type::Int16;
       integer.value = buffer_reader.u16();
       break;
     }
 
     case 4U: {
-      integer.type = ISyscallSerializer::Event::Integer::Type::Int32;
+      integer.type = IFunctionSerializer::Event::Integer::Type::Int32;
       integer.value = buffer_reader.u32();
       break;
     }
 
     case 8U: {
-      integer.type = ISyscallSerializer::Event::Integer::Type::Int64;
+      integer.type = IFunctionSerializer::Event::Integer::Type::Int64;
       integer.value = buffer_reader.u64();
       break;
     }
@@ -195,7 +195,7 @@ GenericSyscallSerializer::parseEvents(ISyscallSerializer::Event &event,
     }
     }
 
-    ISyscallSerializer::Event::Variant event_value = {};
+    IFunctionSerializer::Event::Variant event_value = {};
 
     if (d->string_parameter_list.count(param_name) > 0) {
       if ((integer.value >> 56) == 0xFF) {
