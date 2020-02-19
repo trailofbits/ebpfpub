@@ -7,20 +7,21 @@
 */
 
 #include "syscallserializerfactory.h"
-#include "connectsyscallserializer.h"
-#include "genericsyscallserializer.h"
 
 #include <unordered_map>
 
+#include <ebpfpub/serializers/connectsyscallserializer.h>
+#include <ebpfpub/serializers/genericsyscallserializer.h>
+
 namespace tob::ebpfpub {
 namespace {
-std::unordered_map<std::string, ISyscallSerializer::Factory>
+std::unordered_map<std::string, IFunctionSerializer::Factory>
     kSyscallSerializerFactory;
 
 template <typename Serializer>
-StringErrorOr<ISyscallSerializer::Ref> serializerFactory() {
+StringErrorOr<IFunctionSerializer::Ref> serializerFactory() {
   try {
-    return ISyscallSerializer::Ref(new Serializer());
+    return IFunctionSerializer::Ref(new Serializer());
 
   } catch (const std::bad_alloc &) {
     return StringError::create("Memory allocation failure");
@@ -64,7 +65,7 @@ SuccessOrStringError initializeSerializerFactory() {
   return {};
 }
 
-StringErrorOr<ISyscallSerializer::Ref> createSerializer(std::string name) {
+StringErrorOr<IFunctionSerializer::Ref> createSerializer(std::string name) {
   auto factory_it = kSyscallSerializerFactory.find(name);
   if (factory_it == kSyscallSerializerFactory.end()) {
     name = "generic";

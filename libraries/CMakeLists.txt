@@ -1,5 +1,16 @@
-cmake_minimum_required(VERSION 3.16.1)
+#
+# Copyright (c) 2019-present, Trail of Bits, Inc.
+# All rights reserved.
+#
+# This source code is licensed in accordance with the terms specified in
+# the LICENSE file found in the root directory of this source tree.
+#
 
-add_subdirectory("ebpf-common")
-add_subdirectory("CLI11")
+cmake_minimum_required(VERSION 3.16.3)
 
+function(ebpfpubLibraries)
+  add_subdirectory("ebpf-common")
+  add_subdirectory("CLI11")
+endfunction()
+
+ebpfpubLibraries()

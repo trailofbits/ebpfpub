@@ -20,6 +20,7 @@ Type readType(const std::uint8_t *&buffer, std::size_t &buffer_size,
   if (bytes_read + sizeof(output) > buffer_size) {
     std::cout << bytes_read << " + " << sizeof(output) << " >= " << buffer_size
               << std::endl;
+
     throw std::runtime_error("Not enough bytes");
   }
 
@@ -33,14 +34,20 @@ Type readType(const std::uint8_t *&buffer, std::size_t &buffer_size,
 struct BufferReader::PrivateData final {
   const std::uint8_t *buffer{nullptr};
   std::size_t buffer_size{0U};
-
   std::size_t bytes_read{0U};
 };
 
-BufferReader::BufferReader(const std::uint8_t *buffer, std::size_t buffer_size)
-    : d(new PrivateData) {
-  d->buffer = buffer;
-  d->buffer_size = buffer_size;
+StringErrorOr<BufferReader::Ref>
+BufferReader::create(const std::uint8_t *buffer, std::size_t buffer_size) {
+  try {
+    return Ref(new BufferReader(buffer, buffer_size));
+
+  } catch (const std::bad_alloc &) {
+    return StringError::create("Memory allocation failure");
+
+  } catch (const StringError &error) {
+    return error;
+  }
 }
 
 BufferReader::~BufferReader() {}
@@ -93,5 +100,11 @@ std::size_t BufferReader::bytesRead() const { return d->bytes_read; }
 
 std::size_t BufferReader::availableBytes() const {
   return d->buffer_size - d->bytes_read;
+}
+
+BufferReader::BufferReader(const std::uint8_t *buffer, std::size_t buffer_size)
+    : d(new PrivateData) {
+  d->buffer = buffer;
+  d->buffer_size = buffer_size;
 }
 } // namespace tob::ebpfpub

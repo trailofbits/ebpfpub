@@ -8,8 +8,5 @@
 
 cmake_minimum_required(VERSION 3.16.3)
 
-function(ebpfpubLibrariesEbpfCommon)
-  add_subdirectory("src")
-endfunction()
-
-ebpfpubLibrariesEbpfCommon()
+option(EBPFPUB_ENABLE_TOOLS "Set to ON to build the ebpfpub tools")
+option(EBPFPUB_ENABLE_EXAMPLES "Set to ON to build the ebpfpub examples")

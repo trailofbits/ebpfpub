@@ -8,12 +8,11 @@
 
 #pragma once
 
-#include "isyscallserializer.h"
-
+#include <ebpfpub/ifunctionserializer.h>
 #include <tob/error/error.h>
 
 namespace tob::ebpfpub {
 SuccessOrStringError initializeSerializerFactory();
 
-StringErrorOr<ISyscallSerializer::Ref> createSerializer(std::string name);
+StringErrorOr<IFunctionSerializer::Ref> createSerializer(std::string name);
 } // namespace tob::ebpfpub

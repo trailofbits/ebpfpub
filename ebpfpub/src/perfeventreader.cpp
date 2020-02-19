@@ -8,7 +8,7 @@
 
 #include "perfeventreader.h"
 #include "bufferreader.h"
-#include "syscalltracepoint.h"
+#include "functiontracer.h"
 
 #include <unordered_map>
 #include <vector>
@@ -24,34 +24,21 @@ struct PerfEventReader::PrivateData final {
   ebpf::PerfEventArray &perf_event_array;
   IBufferStorage &buffer_storage;
 
-  std::unordered_map<std::uint32_t, ISyscallTracepoint::Ref>
-      syscall_tracepoint_map;
+  std::unordered_map<std::uint32_t, IFunctionTracer::Ref> function_tracer_map;
 };
 
 PerfEventReader::~PerfEventReader() {}
 
-void PerfEventReader::insert(ISyscallTracepoint::Ref syscall_tracepoint) {
+void PerfEventReader::insert(IFunctionTracer::Ref syscall_tracepoint) {
   auto event_identifier = syscall_tracepoint->eventIdentifier();
 
-  d->syscall_tracepoint_map.insert(
+  d->function_tracer_map.insert(
       {event_identifier, std::move(syscall_tracepoint)});
 }
 
-SuccessOrStringError
-PerfEventReader::exec(std::atomic_bool &terminate,
-                      void (*callback)(const ISyscallTracepoint::EventList &)) {
-
-  for (auto &p : d->syscall_tracepoint_map) {
-    auto &syscall_tracepoint_ref = p.second;
-
-    auto &syscall_tracepoint =
-        *static_cast<SyscallTracepoint *>(syscall_tracepoint_ref.get());
-
-    auto success_exp = syscall_tracepoint.start();
-    if (success_exp.failed()) {
-      return success_exp.error();
-    }
-  }
+SuccessOrStringError PerfEventReader::exec(
+    std::atomic_bool &terminate,
+    void (*callback)(const IFunctionSerializer::EventList &)) {
 
   std::vector<std::uint8_t> event_buffer = {};
 
@@ -66,37 +53,43 @@ PerfEventReader::exec(std::atomic_bool &terminate,
     }
 
     // Attempt to interpret the data we received
-    auto buffer_reader = BufferReader(event_buffer.data(), event_buffer.size());
+    auto buffer_reader_exp =
+        BufferReader::create(event_buffer.data(), event_buffer.size());
 
-    while (buffer_reader.availableBytes() > 0U) {
-      if (buffer_reader.availableBytes() <= 8U) {
+    if (!buffer_reader_exp.succeeded()) {
+      return buffer_reader_exp.error();
+    }
+
+    auto buffer_reader = buffer_reader_exp.takeValue();
+
+    while (buffer_reader->availableBytes() > 0U) {
+      if (buffer_reader->availableBytes() <= 8U) {
         break;
       }
 
-      auto event_entry_size = buffer_reader.peekU32(0U);
-      auto event_identifier = buffer_reader.peekU32(4U);
+      auto event_entry_size = buffer_reader->peekU32(0U);
+      auto event_identifier = buffer_reader->peekU32(4U);
 
-      if (event_entry_size > buffer_reader.availableBytes()) {
+      if (event_entry_size > buffer_reader->availableBytes()) {
         break;
       }
 
-      auto syscall_tracepoint_it =
-          d->syscall_tracepoint_map.find(event_identifier);
+      auto function_tracer_it = d->function_tracer_map.find(event_identifier);
 
-      if (syscall_tracepoint_it == d->syscall_tracepoint_map.end()) {
-        buffer_reader.skipBytes(event_entry_size);
+      if (function_tracer_it == d->function_tracer_map.end()) {
+        buffer_reader->skipBytes(event_entry_size);
         break;
       }
 
-      auto &syscall_ref = *static_cast<SyscallTracepoint *>(
-          syscall_tracepoint_it->second.get());
+      auto &tracer =
+          *static_cast<FunctionTracer *>(function_tracer_it->second.get());
 
-      auto start_offset = buffer_reader.offset();
+      auto start_offset = buffer_reader->offset();
 
-      auto event_list_exp = syscall_ref.parseEvents(buffer_reader);
+      auto event_list_exp = tracer.parseEvents(*buffer_reader.get());
       if (!event_list_exp.succeeded()) {
-        buffer_reader.setOffset(start_offset);
-        buffer_reader.skipBytes(event_entry_size);
+        buffer_reader->setOffset(start_offset);
+        buffer_reader->skipBytes(event_entry_size);
         continue;
       }
 
@@ -105,15 +98,6 @@ PerfEventReader::exec(std::atomic_bool &terminate,
     }
 
     event_buffer.clear();
-  }
-
-  for (auto &p : d->syscall_tracepoint_map) {
-    auto &syscall_tracepoint_ref = p.second;
-
-    auto &syscall_tracepoint =
-        *static_cast<SyscallTracepoint *>(syscall_tracepoint_ref.get());
-
-    syscall_tracepoint.stop();
   }
 
   return {};

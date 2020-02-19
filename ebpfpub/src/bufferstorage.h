@@ -25,11 +25,11 @@ public:
   virtual std::size_t bufferSize() const override;
   virtual std::size_t bufferCount() const override;
 
-  int bufferMap() const;
-  int indexMap() const;
+  virtual int bufferMap() const override;
+  virtual int indexMap() const override;
 
-  ebpf::BPFMapErrorCode getBuffer(std::vector<std::uint8_t> &value,
-                                  std::uint64_t index);
+  virtual ebpf::BPFMapErrorCode getBuffer(std::vector<std::uint8_t> &value,
+                                          std::uint64_t index) override;
 
   BufferStorage(const BufferStorage &) = delete;
   BufferStorage &operator=(const BufferStorage &) = delete;

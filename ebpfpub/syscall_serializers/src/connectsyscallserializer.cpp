@@ -6,13 +6,13 @@
   the LICENSE file found in the root directory of this source tree.
 */
 
-#include "connectsyscallserializer.h"
-
 #include <iomanip>
 #include <sstream>
 
 #include <netinet/in.h>
 #include <sys/un.h>
+
+#include <ebpfpub/serializers/connectsyscallserializer.h>
 
 namespace tob::ebpfpub {
 namespace {
@@ -20,7 +20,7 @@ std::uint32_t kAddressStructSizeLimit{512U};
 }
 
 struct ConnectSyscallSerializer::PrivateData final {
-  ebpf::TracepointEvent::Structure enter_event_struct;
+  ebpf::Structure enter_structure;
 };
 
 ConnectSyscallSerializer::ConnectSyscallSerializer() : d(new PrivateData) {}
@@ -33,11 +33,11 @@ const std::string &ConnectSyscallSerializer::name() const {
 }
 
 SuccessOrStringError
-ConnectSyscallSerializer::generate(const ebpf::TracepointEvent &enter_event,
-                                   BPFProgramWriter &bpf_prog_writer) {
+ConnectSyscallSerializer::generate(const ebpf::Structure &enter_structure,
+                                   IBPFProgramWriter &bpf_prog_writer) {
 
   // Save the enter event structure
-  d->enter_event_struct = enter_event.structure();
+  d->enter_structure = enter_structure;
 
   // Take the event entry
   auto value_exp = bpf_prog_writer.value("event_entry");
@@ -59,7 +59,7 @@ ConnectSyscallSerializer::generate(const ebpf::TracepointEvent &enter_event,
   auto &builder = bpf_prog_writer.builder();
   auto &context = bpf_prog_writer.context();
 
-  d->enter_event_struct = enter_event.structure();
+  d->enter_structure = enter_structure;
 
   auto event_data = builder.CreateGEP(
       event_entry, {builder.getInt32(0), builder.getInt32(1)});
@@ -72,7 +72,7 @@ ConnectSyscallSerializer::generate(const ebpf::TracepointEvent &enter_event,
 
   // Limit the amount of bytes that can be specified inside the size field
   auto address_len_limit = builder.getInt32(kAddressStructSizeLimit);
-  auto address_len_type_size = d->enter_event_struct.at(5U + 2U).size;
+  auto address_len_type_size = d->enter_structure.at(5U + 2U).size;
 
   if (address_len_type_size != 4U && address_len_type_size != 8U) {
     return StringError::create("Invalid `address_len` type size");
@@ -108,25 +108,25 @@ ConnectSyscallSerializer::generate(const ebpf::TracepointEvent &enter_event,
 }
 
 SuccessOrStringError
-ConnectSyscallSerializer::parseEvents(ISyscallTracepoint::Event &event,
-                                      BufferReader &buffer_reader,
-                                      BufferStorage &buffer_storage) {
+ConnectSyscallSerializer::parseEvents(IFunctionSerializer::Event &event,
+                                      IBufferReader &buffer_reader,
+                                      IBufferStorage &buffer_storage) {
 
   // fd
-  const auto &fd_field = d->enter_event_struct.at(5U + 0U);
+  const auto &fd_field = d->enter_structure.at(5U + 0U);
 
-  ISyscallTracepoint::Event::Integer fd_integer;
+  IFunctionSerializer::Event::Integer fd_integer;
   fd_integer.is_signed = fd_field.is_signed;
 
   switch (fd_field.size) {
   case 4U: {
-    fd_integer.type = ISyscallTracepoint::Event::Integer::Type::Int32;
+    fd_integer.type = IFunctionSerializer::Event::Integer::Type::Int32;
     fd_integer.value = buffer_reader.u32();
     break;
   }
 
   case 8U: {
-    fd_integer.type = ISyscallTracepoint::Event::Integer::Type::Int64;
+    fd_integer.type = IFunctionSerializer::Event::Integer::Type::Int64;
     fd_integer.value = buffer_reader.u64();
     break;
   }
@@ -138,25 +138,25 @@ ConnectSyscallSerializer::parseEvents(ISyscallTracepoint::Event &event,
   }
 
   // sockaddr buffer ptr
-  ISyscallTracepoint::Event::Integer sockaddr_integer;
-  sockaddr_integer.type = ISyscallTracepoint::Event::Integer::Type::Int64;
+  IFunctionSerializer::Event::Integer sockaddr_integer;
+  sockaddr_integer.type = IFunctionSerializer::Event::Integer::Type::Int64;
   sockaddr_integer.value = buffer_reader.u64();
 
   // addrlen
-  auto addrlen_field = d->enter_event_struct.at(5U + 2U);
+  auto addrlen_field = d->enter_structure.at(5U + 2U);
 
-  ISyscallTracepoint::Event::Integer addrlen_integer;
+  IFunctionSerializer::Event::Integer addrlen_integer;
   addrlen_integer.is_signed = addrlen_field.is_signed;
 
   switch (addrlen_field.size) {
   case 4U: {
-    addrlen_integer.type = ISyscallTracepoint::Event::Integer::Type::Int32;
+    addrlen_integer.type = IFunctionSerializer::Event::Integer::Type::Int32;
     addrlen_integer.value = buffer_reader.u32();
     break;
   }
 
   case 8U: {
-    addrlen_integer.type = ISyscallTracepoint::Event::Integer::Type::Int64;
+    addrlen_integer.type = IFunctionSerializer::Event::Integer::Type::Int64;
     addrlen_integer.value = buffer_reader.u64();
     break;
   }

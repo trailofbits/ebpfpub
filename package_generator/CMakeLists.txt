@@ -1,4 +1,12 @@
-cmake_minimum_required(VERSION 3.14)
+#
+# Copyright (c) 2019-present, Trail of Bits, Inc.
+# All rights reserved.
+#
+# This source code is licensed in accordance with the terms specified in
+# the LICENSE file found in the root directory of this source tree.
+#
+
+cmake_minimum_required(VERSION 3.16.3)
 project("ebpfpub")
 
 include("../cmake/version.cmake")
@@ -41,9 +49,12 @@ function(ebpfpubPackageGenerator)
 
   install(
     FILES
-      "${EBPFPUB_INSTALL_PATH}/usr/local/include/ebpfpub/iperfeventreader.h"
-      "${EBPFPUB_INSTALL_PATH}/usr/local/include/ebpfpub/isyscalltracepoint.h"
+      "${EBPFPUB_INSTALL_PATH}/usr/local/include/ebpfpub/ibpfprogramwriter.h"
+      "${EBPFPUB_INSTALL_PATH}/usr/local/include/ebpfpub/ibufferreader.h"
       "${EBPFPUB_INSTALL_PATH}/usr/local/include/ebpfpub/ibufferstorage.h"
+      "${EBPFPUB_INSTALL_PATH}/usr/local/include/ebpfpub/ifunctionserializer.h"
+      "${EBPFPUB_INSTALL_PATH}/usr/local/include/ebpfpub/ifunctiontracer.h"
+      "${EBPFPUB_INSTALL_PATH}/usr/local/include/ebpfpub/iperfeventreader.h"
 
     DESTINATION
       "include/ebpfpub"
@@ -51,14 +62,17 @@ function(ebpfpubPackageGenerator)
 
   install(
     FILES
-      "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/ebpf/sectionmemorymanager.h"
-      "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/ebpf/typedbpfmap.h"
-      "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/ebpf/tracepointevent.h"
-      "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/ebpf/llvm_utils.h"
-      "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/ebpf/bpfmap.h"
-      "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/ebpf/ebpf_utils.h"
       "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/ebpf/types.h"
+      "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/ebpf/sectionmemorymanager.h"
+      "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/ebpf/bpfmap.h"
+      "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/ebpf/bpfsyscallinterface.h"
+      "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/ebpf/structure.h"
+      "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/ebpf/ebpf_utils.h"
+      "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/ebpf/typedbpfmap.h"
+      "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/ebpf/llvm_utils.h"
       "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/ebpf/perfeventarray.h"
+      "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/ebpf/tracepointdescriptor.h"
+      "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/ebpf/iperfevent.h"
 
     DESTINATION
       "include/tob/ebpf"
@@ -67,11 +81,11 @@ function(ebpfpubPackageGenerator)
 
   install(
     FILES
-      "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/error/successor.h"
+      "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/error/errorcode.h"
       "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/error/erroror.h"
       "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/error/error.h"
+      "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/error/successor.h"
       "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/error/stringerror.h"
-      "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/error/errorcode.h"
 
     DESTINATION
       "include/tob/error"
@@ -80,8 +94,8 @@ function(ebpfpubPackageGenerator)
 
   install(
     FILES
+      "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/utils/ielfimage.h"
       "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/utils/uniquefd.h"
-      "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/utils/uniquemappedmemory.h"
       "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/utils/uniqueref.h"
 
     DESTINATION

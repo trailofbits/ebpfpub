@@ -8,12 +8,12 @@
 
 #pragma once
 
-#include "isyscallserializer.h"
-
 #include <memory>
 
+#include <ebpfpub/ifunctionserializer.h>
+
 namespace tob::ebpfpub {
-class GenericSyscallSerializer final : public ISyscallSerializer {
+class GenericSyscallSerializer final : public IFunctionSerializer {
 public:
   GenericSyscallSerializer();
   virtual ~GenericSyscallSerializer() override;
@@ -21,12 +21,12 @@ public:
   virtual const std::string &name() const override;
 
   virtual SuccessOrStringError
-  generate(const ebpf::TracepointEvent &enter_event,
-           BPFProgramWriter &bpf_prog_writer) override;
+  generate(const ebpf::Structure &enter_structure,
+           IBPFProgramWriter &bpf_prog_writer) override;
 
   virtual SuccessOrStringError
-  parseEvents(ISyscallTracepoint::Event &event, BufferReader &buffer_reader,
-              BufferStorage &buffer_storage) override;
+  parseEvents(IFunctionSerializer::Event &event, IBufferReader &buffer_reader,
+              IBufferStorage &buffer_storage) override;
 
 private:
   struct PrivateData;

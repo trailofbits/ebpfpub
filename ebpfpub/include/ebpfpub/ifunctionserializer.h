@@ -8,17 +8,12 @@
 
 #pragma once
 
-#include <cstdint>
-#include <memory>
-#include <optional>
-#include <variant>
-#include <vector>
-
+#include <ebpfpub/ibpfprogramwriter.h>
+#include <ebpfpub/ibufferreader.h>
 #include <ebpfpub/ibufferstorage.h>
-#include <tob/ebpf/perfeventarray.h>
 
 namespace tob::ebpfpub {
-class ISyscallTracepoint {
+class IFunctionSerializer {
 public:
   struct Event final {
     struct Header final {
@@ -47,33 +42,31 @@ public:
         std::variant<std::string, std::vector<std::uint8_t>, Integer>;
 
     using OptionalVariant = std::optional<Variant>;
-
     using FieldMap = std::unordered_map<std::string, OptionalVariant>;
 
-    std::string syscall_name;
+    std::string name;
     Header header;
     FieldMap field_map;
   };
 
   using EventList = std::vector<Event>;
 
-  using Ref = std::unique_ptr<ISyscallTracepoint>;
+  using Ref = std::unique_ptr<IFunctionSerializer>;
+  using Factory = StringErrorOr<Ref> (*)();
 
-  static StringErrorOr<Ref> create(const std::string &syscall_name,
-                                   IBufferStorage &buffer_storage,
-                                   ebpf::PerfEventArray &perf_event_array,
-                                   std::size_t event_map_size);
+  IFunctionSerializer() = default;
+  virtual ~IFunctionSerializer() = default;
 
-  ISyscallTracepoint() = default;
-  virtual ~ISyscallTracepoint() = default;
+  virtual const std::string &name() const = 0;
 
-  virtual const std::string &syscallName() const = 0;
-  virtual const std::string &serializerName() const = 0;
+  virtual SuccessOrStringError generate(const ebpf::Structure &enter_structure,
+                                        IBPFProgramWriter &bpf_prog_writer) = 0;
 
-  virtual StringErrorOr<std::string> generateIR() const = 0;
-  virtual std::uint32_t eventIdentifier() const = 0;
+  virtual SuccessOrStringError parseEvents(Event &event,
+                                           IBufferReader &buffer_reader,
+                                           IBufferStorage &buffer_storage) = 0;
 
-  ISyscallTracepoint(const ISyscallTracepoint &) = delete;
-  ISyscallTracepoint &operator=(const ISyscallTracepoint &) = delete;
+  IFunctionSerializer(const IFunctionSerializer &) = delete;
+  IFunctionSerializer &operator=(const IFunctionSerializer &) = delete;
 };
 } // namespace tob::ebpfpub

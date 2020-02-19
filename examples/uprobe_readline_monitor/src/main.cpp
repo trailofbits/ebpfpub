@@ -1,5 +1,4 @@
-#include "configuration.h"
-#include "utils.h"
+#include "readlineserializer.h"
 
 #include <atomic>
 #include <cstring>
@@ -7,6 +6,7 @@
 #include <vector>
 
 #include <signal.h>
+#include <sys/resource.h>
 
 #include <CLI/CLI.hpp>
 
@@ -21,6 +21,17 @@ void signalHandler(int signal) {
   }
 
   terminate = true;
+}
+
+void setRlimit() {
+  struct rlimit rl = {};
+  rl.rlim_max = RLIM_INFINITY;
+  rl.rlim_cur = rl.rlim_max;
+
+  auto error = setrlimit(RLIMIT_MEMLOCK, &rl);
+  if (error != 0) {
+    throw std::runtime_error("Failed to set RLIMIT_MEMLOCK");
+  }
 }
 
 void printEventHeader(
@@ -40,6 +51,7 @@ void printEventHeader(
 void printEventOptionalVariant(
     const tob::ebpfpub::IFunctionSerializer::Event::OptionalVariant
         &opt_variant) {
+
   if (!opt_variant.has_value()) {
     std::cout << "<NULL>";
     return;
@@ -55,7 +67,7 @@ void printEventOptionalVariant(
 
     const auto &value = std::get<std::vector<std::uint8_t>>(variant);
 
-    std::cout << "<buffer of " << value.size() << " bytes";
+    std::cout << "<buffer of " << value.size() << " bytes>";
 
   } else if (std::holds_alternative<
                  tob::ebpfpub::IFunctionSerializer::Event::Integer>(variant)) {
@@ -94,27 +106,13 @@ void printEvent(const tob::ebpfpub::IFunctionSerializer::Event &event) {
 } // namespace
 
 int main(int argc, char *argv[]) {
-  tob::ebpfpub::setRlimit();
-
+  setRlimit();
   signal(SIGINT, signalHandler);
-
-  tob::ebpfpub::UserSettings user_settings;
-
-  {
-    auto user_settings_exp = tob::ebpfpub::parseUserSettings(argc, argv);
-    if (!user_settings_exp.succeeded()) {
-      std::cerr << user_settings_exp.error().message() << "\n";
-      return 1;
-    }
-
-    user_settings = user_settings_exp.takeValue();
-  }
 
   tob::ebpfpub::IBufferStorage::Ref buffer_storage;
 
   {
-    auto buffer_storage_exp = tob::ebpfpub::IBufferStorage::create(
-        user_settings.buffer_size, user_settings.buffer_count);
+    auto buffer_storage_exp = tob::ebpfpub::IBufferStorage::create(4096U, 100U);
 
     if (!buffer_storage_exp.succeeded()) {
       const auto &error = buffer_storage_exp.error();
@@ -126,15 +124,10 @@ int main(int argc, char *argv[]) {
     buffer_storage = buffer_storage_exp.takeValue();
   }
 
-  std::cout << "Memory usage\n\n";
-  std::cout << " > Buffer storage: " << buffer_storage->memoryUsage()
-            << " bytes\n";
-
   tob::ebpf::PerfEventArray::Ref perf_event_array;
 
   {
-    auto perf_event_array_exp =
-        tob::ebpf::PerfEventArray::create(user_settings.perf_event_array_size);
+    auto perf_event_array_exp = tob::ebpf::PerfEventArray::create(10U);
 
     if (!perf_event_array_exp.succeeded()) {
       const auto &error = perf_event_array_exp.error();
@@ -145,9 +138,6 @@ int main(int argc, char *argv[]) {
 
     perf_event_array = perf_event_array_exp.takeValue();
   }
-
-  std::cout << " > Perf output: " << perf_event_array->memoryUsage()
-            << " bytes\n\n";
 
   tob::ebpfpub::IPerfEventReader::Ref perf_event_reader;
 
@@ -165,27 +155,33 @@ int main(int argc, char *argv[]) {
     perf_event_reader = perf_event_reader_exp.takeValue();
   }
 
-  std::cout << "Generating the BPF programs...\n\n";
+  const tob::ebpf::Structure readline_argument_list = {
+      {"const char *", "prompt", 0U, 8U, false}};
 
-  for (const auto &syscall_name : user_settings.tracepoint_list) {
-    tob::ebpfpub::IFunctionTracer::Ref function_tracer = {};
-    auto function_tracer_exp =
-        tob::ebpfpub::IFunctionTracer::createFromSyscallTracepoint(
-            syscall_name, *buffer_storage.get(), *perf_event_array.get(),
-            user_settings.event_map_size);
+  auto serializer_exp = tob::ebpfpub::ReadlineSerializer::create();
+  if (!serializer_exp.succeeded()) {
+    const auto &error = serializer_exp.error();
+    std::cerr << error.message() << "\n";
 
-    if (!function_tracer_exp.succeeded()) {
-      const auto &error = function_tracer_exp.error();
-      std::cerr << error.message() << "\n";
-
-      return 1;
-    }
-
-    function_tracer = function_tracer_exp.takeValue();
-
-    std::cout << " > " << syscall_name << "\n";
-    perf_event_reader->insert(std::move(function_tracer));
+    return 1;
   }
+
+  auto serializer = serializer_exp.takeValue();
+
+  auto function_tracer_exp = tob::ebpfpub::IFunctionTracer::createFromUprobe(
+      "readline", "/usr/lib/libreadline.so.8.0", readline_argument_list,
+      *buffer_storage.get(), *perf_event_array.get(), 256U,
+      std::move(serializer));
+
+  if (!function_tracer_exp.succeeded()) {
+    const auto &error = function_tracer_exp.error();
+    std::cerr << error.message() << "\n";
+
+    return 1;
+  }
+
+  auto function_tracer = function_tracer_exp.takeValue();
+  perf_event_reader->insert(std::move(function_tracer));
 
   std::cout << "\nEntering main loop...\n\n";
 

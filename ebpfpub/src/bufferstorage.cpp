@@ -76,7 +76,6 @@ BufferStorage::BufferStorage(std::size_t buffer_size, std::size_t buffer_count)
   d->buffer_count = buffer_count;
 
   auto buffer_map_exp = BufferMap::create(buffer_size, buffer_count);
-
   if (!buffer_map_exp.succeeded()) {
     throw buffer_map_exp.error();
   }
@@ -84,7 +83,6 @@ BufferStorage::BufferStorage(std::size_t buffer_size, std::size_t buffer_count)
   d->buffer_map = buffer_map_exp.takeValue();
 
   auto index_map_exp = IndexMap::create(1U);
-
   if (!index_map_exp.succeeded()) {
     throw index_map_exp.error();
   }
@@ -94,7 +92,6 @@ BufferStorage::BufferStorage(std::size_t buffer_size, std::size_t buffer_count)
 
 StringErrorOr<IBufferStorage::Ref>
 IBufferStorage::create(std::size_t buffer_size, std::size_t buffer_count) {
-
   try {
     return Ref(new BufferStorage(buffer_size, buffer_count));
 

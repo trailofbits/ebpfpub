@@ -5,8 +5,6 @@ StringErrorOr<UserSettings> parseUserSettings(int argc, char *argv[]) {
   CLI::App application("eBPFTracer");
 
   UserSettings user_settings;
-  application.add_flag("-v,--verbose", user_settings.verbose_flag,
-                       "Print the generated eBPF program before execution");
 
   std::string tracepoint_list;
   application
@@ -31,7 +29,6 @@ StringErrorOr<UserSettings> parseUserSettings(int argc, char *argv[]) {
     application.parse(argc, argv);
 
     std::stringstream stream(tracepoint_list);
-
     std::string tracepoint_name;
     while (std::getline(stream, tracepoint_name, ',')) {
       user_settings.tracepoint_list.push_back(tracepoint_name);

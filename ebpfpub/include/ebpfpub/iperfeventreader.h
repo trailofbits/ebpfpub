@@ -12,7 +12,8 @@
 #include <memory>
 
 #include <ebpfpub/ibufferstorage.h>
-#include <ebpfpub/isyscalltracepoint.h>
+#include <ebpfpub/ifunctionserializer.h>
+#include <ebpfpub/ifunctiontracer.h>
 
 #include <tob/ebpf/perfeventarray.h>
 
@@ -27,11 +28,11 @@ public:
   IPerfEventReader() = default;
   virtual ~IPerfEventReader() = default;
 
-  virtual void insert(ISyscallTracepoint::Ref syscall_tracepoint) = 0;
+  virtual void insert(IFunctionTracer::Ref syscall_tracepoint) = 0;
 
   virtual SuccessOrStringError
   exec(std::atomic_bool &terminate,
-       void (*callback)(const ISyscallTracepoint::EventList &)) = 0;
+       void (*callback)(const IFunctionSerializer::EventList &)) = 0;
 
   IPerfEventReader(const IPerfEventReader &) = delete;
   IPerfEventReader &operator=(const IPerfEventReader &) = delete;

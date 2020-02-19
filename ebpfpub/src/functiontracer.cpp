@@ -6,89 +6,76 @@
   the LICENSE file found in the root directory of this source tree.
 */
 
-#include "syscalltracepoint.h"
+#include "functiontracer.h"
+#include "abi.h"
 #include "syscallserializerfactory.h"
 
-#include <fstream>
-#include <iostream>
+#include <atomic>
 
-#include <llvm/ExecutionEngine/MCJIT.h>
-#include <llvm/IR/Module.h>
 #include <llvm/IR/Verifier.h>
 
-#include <tob/ebpf/bpfmap.h>
 #include <tob/ebpf/ebpf_utils.h>
+#include <tob/ebpf/iperfevent.h>
 #include <tob/ebpf/llvm_utils.h>
-#include <tob/ebpf/tracepointevent.h>
+#include <tob/ebpf/tracepointdescriptor.h>
 
 namespace tob::ebpfpub {
 namespace {
 using EventMap = ebpf::BPFMap<BPF_MAP_TYPE_HASH, std::uint64_t>;
 using StackMap = ebpf::BPFMap<BPF_MAP_TYPE_PERCPU_ARRAY, std::uint32_t>;
 
+const std::string kLLVMModuleName{"FunctionTracer"};
+
 const std::string kSyscallsEventCategory{"syscalls"};
 const std::string kEnterEventNamePrefix{"sys_enter_"};
 const std::string kExitEventNamePrefix{"sys_exit_"};
 
-const std::string kLLVMModuleName{"SyscallModule"};
+void initializeSerializerFactoryHelper() {
+  static const auto serializers_initialized_exp = initializeSerializerFactory();
+
+  if (serializers_initialized_exp.failed()) {
+    throw serializers_initialized_exp.error();
+  }
+}
+
+std::uint32_t generateKprobeIdentifier() {
+  static std::atomic_uint32_t identifier_generator{0U};
+  return ++identifier_generator;
+}
 } // namespace
 
-struct SyscallTracepoint::PrivateData final {
+struct FunctionTracer::PrivateData final {
   PrivateData(IBufferStorage &buffer_storage_,
               ebpf::PerfEventArray &perf_event_array_)
       : buffer_storage(buffer_storage_), perf_event_array(perf_event_array_) {}
 
-  std::string syscall_name;
+  EventData event_data;
+  IFunctionSerializer::Ref serializer;
 
+  std::size_t event_map_size;
   IBufferStorage &buffer_storage;
   ebpf::PerfEventArray &perf_event_array;
-
-  ebpf::TracepointEvent::Ref enter_event;
-  ebpf::TracepointEvent::Ref exit_event;
 
   llvm::LLVMContext llvm_context;
   std::unique_ptr<llvm::Module> llvm_module;
 
-  BPFProgramResources program_resources;
-  ISyscallSerializer::Ref syscall_serializer;
+  BPFProgramWriter::ProgramResources program_resources;
 
-  utils::UniqueFd enter_event_fd;
-  utils::UniqueFd enter_program_fd;
-
-  utils::UniqueFd exit_event_fd;
-  utils::UniqueFd exit_program_fd;
+  utils::UniqueFd enter_program;
+  utils::UniqueFd exit_program;
 };
 
-SyscallTracepoint::~SyscallTracepoint() { stop(); }
+FunctionTracer::~FunctionTracer() {}
 
-const std::string &SyscallTracepoint::syscallName() const {
-  return d->syscall_name;
+const std::string &FunctionTracer::name() const { return d->event_data.name; }
+
+std::uint32_t FunctionTracer::eventIdentifier() const {
+  return d->event_data.enter_event->identifier();
 }
 
-const std::string &SyscallTracepoint::serializerName() const {
-  return d->syscall_serializer->name();
-}
-
-StringErrorOr<std::string> SyscallTracepoint::generateIR() const {
-  std::string buffer;
-
-  llvm::raw_string_ostream stream(buffer);
-  d->llvm_module->print(stream, nullptr, false, true);
-
-  if (buffer.empty()) {
-    return StringError::create("Failed to generate the IR");
-  }
-
-  return buffer;
-}
-
-std::uint32_t SyscallTracepoint::eventIdentifier() const {
-  return d->enter_event->eventIdentifier();
-}
-
-StringErrorOr<SyscallTracepoint::EventList>
-SyscallTracepoint::parseEvents(BufferReader &buffer_reader) const {
-  EventList event_list;
+StringErrorOr<IFunctionSerializer::EventList>
+FunctionTracer::parseEvents(IBufferReader &buffer_reader) const {
+  IFunctionSerializer::EventList event_list;
 
   auto &buffer_storage_impl = static_cast<BufferStorage &>(d->buffer_storage);
 
@@ -99,8 +86,7 @@ SyscallTracepoint::parseEvents(BufferReader &buffer_reader) const {
 
     auto entry_size = buffer_reader.peekU32(0U);
     auto event_identifier = buffer_reader.peekU32(4U);
-
-    if (event_identifier != eventIdentifier()) {
+    if (event_identifier != d->event_data.enter_event->identifier()) {
       break;
     }
 
@@ -112,8 +98,8 @@ SyscallTracepoint::parseEvents(BufferReader &buffer_reader) const {
 
     buffer_reader.skipBytes(8U);
 
-    Event event = {};
-    event.syscall_name = d->syscall_name;
+    IFunctionSerializer::Event event = {};
+    event.name = d->event_data.name;
 
     event.header.timestamp = buffer_reader.u64();
     event.header.parent_process_id = 0U;
@@ -124,14 +110,14 @@ SyscallTracepoint::parseEvents(BufferReader &buffer_reader) const {
     event.header.exit_code = buffer_reader.u64();
     event.header.probe_error = (buffer_reader.u64() != 0U);
 
-    auto success_exp = d->syscall_serializer->parseEvents(event, buffer_reader,
-                                                          buffer_storage_impl);
+    auto success_exp =
+        d->serializer->parseEvents(event, buffer_reader, buffer_storage_impl);
+
     if (success_exp.failed()) {
       return success_exp.error();
     }
 
     event_list.push_back(std::move(event));
-
     if (buffer_reader.availableBytes() == 0U) {
       break;
     }
@@ -144,128 +130,15 @@ SyscallTracepoint::parseEvents(BufferReader &buffer_reader) const {
   return event_list;
 }
 
-SuccessOrStringError SyscallTracepoint::start() {
-  // Compile the module; we'll obtain one program for the enter event, and
-  // another one for the exit event
-  auto &module = *d->llvm_module.get();
-
-  auto program_map_exp = ebpf::compileModule(module);
-  if (!program_map_exp.succeeded()) {
-    return program_map_exp.error();
-  }
-
-  auto program_map = program_map_exp.takeValue();
-
-  auto enter_program_it = program_map.find("on_syscall_enter_section");
-
-  if (enter_program_it == program_map.end()) {
-    return StringError::create("Failed to compile the enter program");
-  }
-
-  auto &enter_program = enter_program_it->second;
-
-  auto exit_program_it = program_map.find("on_syscall_exit_section");
-
-  if (exit_program_it == program_map.end()) {
-    return StringError::create("Failed to compile the exit program");
-  }
-
-  auto &exit_program = exit_program_it->second;
-
-  // Start both tracepoints
-  auto tracepoints_status = enableTracepoints();
-  if (tracepoints_status.failed()) {
-    return tracepoints_status.error();
-  }
-
-  // Load the enter program
-  auto enter_event_exp =
-      ebpf::createTracepointEvent(d->enter_event->eventIdentifier(), -1);
-
-  if (!enter_event_exp.succeeded()) {
-    return enter_event_exp.error();
-  }
-
-  d->enter_event_fd = enter_event_exp.takeValue();
-
-  auto program_exp = ebpf::loadProgram(enter_program, d->enter_event_fd.get(),
-                                       BPF_PROG_TYPE_TRACEPOINT);
-
-  if (!program_exp.succeeded()) {
-    auto load_error = "The 'enter' program could not be loaded: " +
-                      program_exp.error().message();
-
-    return StringError::create(load_error);
-  }
-
-  d->enter_program_fd = program_exp.takeValue();
-
-  // Load the exit program
-  auto exit_event_exp =
-      ebpf::createTracepointEvent(d->exit_event->eventIdentifier(), -1);
-
-  if (!exit_event_exp.succeeded()) {
-    return exit_event_exp.error();
-  }
-
-  d->exit_event_fd = exit_event_exp.takeValue();
-
-  program_exp = ebpf::loadProgram(exit_program, d->exit_event_fd.get(),
-                                  BPF_PROG_TYPE_TRACEPOINT);
-
-  if (!program_exp.succeeded()) {
-    auto load_error = "The 'exit' program could not be loaded: " +
-                      program_exp.error().message();
-
-    return StringError::create(load_error);
-  }
-
-  d->exit_program_fd = program_exp.takeValue();
-  return {};
-}
-
-void SyscallTracepoint::stop() {
-  disableTracepoints();
-
-  ebpf::closeEvent(d->enter_event_fd);
-  d->enter_program_fd.reset();
-
-  ebpf::closeEvent(d->exit_event_fd);
-  d->exit_program_fd.reset();
-}
-
-SyscallTracepoint::SyscallTracepoint(const std::string &syscall_name,
-                                     IBufferStorage &buffer_storage,
-                                     ebpf::PerfEventArray &perf_event_array,
-                                     std::size_t event_map_size)
+FunctionTracer::FunctionTracer(EventData event_data,
+                               IFunctionSerializer::Ref serializer,
+                               std::size_t event_map_size,
+                               IBufferStorage &buffer_storage,
+                               ebpf::PerfEventArray &perf_event_array)
     : d(new PrivateData(buffer_storage, perf_event_array)) {
 
-  static auto serializers_initialized_exp = initializeSerializerFactory();
-
-  if (serializers_initialized_exp.failed()) {
-    throw serializers_initialized_exp.error();
-  }
-
-  d->syscall_name = syscall_name;
-
-  // Open the tracepoint events
-  auto event_exp = ebpf::TracepointEvent::create(
-      kSyscallsEventCategory, kEnterEventNamePrefix + d->syscall_name);
-
-  if (!event_exp.succeeded()) {
-    throw event_exp.error();
-  }
-
-  d->enter_event = event_exp.takeValue();
-
-  event_exp = ebpf::TracepointEvent::create(
-      kSyscallsEventCategory, kExitEventNamePrefix + d->syscall_name);
-
-  if (!event_exp.succeeded()) {
-    throw event_exp.error();
-  }
-
-  d->exit_event = event_exp.takeValue();
+  d->event_data = std::move(event_data);
+  d->serializer = std::move(serializer);
 
   // Initialize the LLVM module
   d->llvm_module = ebpf::createLLVMModule(d->llvm_context, kLLVMModuleName);
@@ -276,19 +149,22 @@ SyscallTracepoint::SyscallTracepoint(const std::string &syscall_name,
   // Create the BPF writer helper
   auto &buffer_storage_impl = static_cast<BufferStorage &>(d->buffer_storage);
 
-  auto bpf_program_writer_exp =
-      BPFProgramWriter::create(*d->llvm_module.get(), buffer_storage_impl,
-                               *d->enter_event.get(), *d->exit_event.get());
+  auto bpf_program_writer_exp = BPFProgramWriter::create(
+      *d->llvm_module.get(), buffer_storage_impl, d->event_data.enter_structure,
+      d->event_data.exit_structure, d->event_data.program_type);
 
   if (!bpf_program_writer_exp.succeeded()) {
     throw bpf_program_writer_exp.error();
   }
 
-  auto bpf_program_writer = bpf_program_writer_exp.takeValue();
+  auto bpf_program_writer_ref = bpf_program_writer_exp.takeValue();
+
+  auto &bpf_program_writer_impl =
+      *static_cast<BPFProgramWriter *>(bpf_program_writer_ref.get());
 
   // Initialize the types and the internal maps
   auto program_resources_exp =
-      bpf_program_writer->initializeProgram(event_map_size);
+      bpf_program_writer_impl.initializeProgram(event_map_size);
 
   if (!program_resources_exp.succeeded()) {
     throw program_resources_exp.error();
@@ -297,49 +173,92 @@ SyscallTracepoint::SyscallTracepoint(const std::string &syscall_name,
   d->program_resources = program_resources_exp.takeValue();
 
   // Generate the common enter function
-  auto success_exp = generateEnterFunction(*bpf_program_writer.get());
+  auto success_exp = generateEnterFunction(bpf_program_writer_impl);
   if (success_exp.failed()) {
     throw success_exp.error();
   }
 
-  bpf_program_writer->clearSavedValues();
+  bpf_program_writer_impl.clearSavedValues();
 
   // Initialize the exit function
-  success_exp = initializeExitFunction(*bpf_program_writer.get());
+  success_exp = initializeExitFunction(bpf_program_writer_impl);
   if (success_exp.failed()) {
     throw success_exp.error();
   }
 
-  // Get a suitable serializer to complete the exit function
-  auto serializer_ref_exp = createSerializer(syscall_name);
-  if (!serializer_ref_exp.succeeded()) {
-    throw serializer_ref_exp.error();
-  }
-
-  d->syscall_serializer = serializer_ref_exp.takeValue();
-
-  success_exp = d->syscall_serializer->generate(*d->enter_event.get(),
-                                                *bpf_program_writer.get());
+  // Use the serializer we have been given to complete the exit function
+  success_exp = d->serializer->generate(d->event_data.enter_structure,
+                                        bpf_program_writer_impl);
   if (success_exp.failed()) {
     throw success_exp.error();
   }
 
   // Finalize the exit function
-  success_exp = finalizeExitFunction(*bpf_program_writer.get());
+  success_exp = finalizeExitFunction(bpf_program_writer_impl);
   if (success_exp.failed()) {
     throw success_exp.error();
   }
+
+  // Compile the module; we'll obtain one program for the enter event, and
+  // another one for the exit event
+  auto &module = *d->llvm_module.get();
+
+  auto program_map_exp = ebpf::compileModule(module);
+  if (!program_map_exp.succeeded()) {
+    throw program_map_exp.error();
+  }
+
+  auto program_map = program_map_exp.takeValue();
+
+  auto enter_program_it = program_map.find("on_syscall_enter_section");
+  if (enter_program_it == program_map.end()) {
+    throw StringError::create("Failed to compile the enter program");
+  }
+
+  auto &enter_program = enter_program_it->second;
+
+  auto exit_program_it = program_map.find("on_syscall_exit_section");
+  if (exit_program_it == program_map.end()) {
+    throw StringError::create("Failed to compile the exit program");
+  }
+
+  auto &exit_program = exit_program_it->second;
+
+  // Load the enter program
+  auto program_exp =
+      ebpf::loadProgram(enter_program, *d->event_data.enter_event.get());
+
+  if (!program_exp.succeeded()) {
+    auto load_error = "The 'enter' program could not be loaded: " +
+                      program_exp.error().message();
+
+    throw StringError::create(load_error);
+  }
+
+  d->enter_program = program_exp.takeValue();
+
+  // Load the exit program
+  program_exp =
+      ebpf::loadProgram(exit_program, *d->event_data.exit_event.get());
+
+  if (!program_exp.succeeded()) {
+    auto load_error = "The 'exit' program could not be loaded: " +
+                      program_exp.error().message();
+
+    throw StringError::create(load_error);
+  }
+
+  d->exit_program = program_exp.takeValue();
 }
 
 SuccessOrStringError
-SyscallTracepoint::generateEnterFunction(BPFProgramWriter &bpf_prog_writer) {
+FunctionTracer::generateEnterFunction(BPFProgramWriter &bpf_prog_writer) {
   auto &builder = bpf_prog_writer.builder();
   auto &context = bpf_prog_writer.context();
   auto &module = bpf_prog_writer.module();
 
   // Create the function
   auto event_function_exp = bpf_prog_writer.getEnterFunction();
-
   if (!event_function_exp.succeeded()) {
     return event_function_exp.error();
   }
@@ -358,9 +277,7 @@ SyscallTracepoint::generateEnterFunction(BPFProgramWriter &bpf_prog_writer) {
 
   // Automatically filter out this event if it's coming from our PID
   auto process_id = builder.getInt64(static_cast<std::uint64_t>(getpid()));
-
   auto &bpf_syscall_interface = bpf_prog_writer.bpfSyscallInterface();
-
   auto current_pid_tgid = bpf_syscall_interface.getCurrentPidTgid();
 
   auto current_tgid =
@@ -394,7 +311,7 @@ SyscallTracepoint::generateEnterFunction(BPFProgramWriter &bpf_prog_writer) {
   auto event_entry_type_ptr = event_entry_type->getPointerTo();
 
   auto event_stack_ptr = bpf_syscall_interface.mapLookupElem(
-      d->program_resources.eventStackMap().fd(), stack_space_key,
+      d->program_resources.event_stack_map->fd(), stack_space_key,
       event_entry_type_ptr);
 
   auto null_event_stack_ptr =
@@ -433,7 +350,7 @@ SyscallTracepoint::generateEnterFunction(BPFProgramWriter &bpf_prog_writer) {
       event_header, {builder.getInt32(0), builder.getInt32(field_index)});
 
   auto event_entry_size = static_cast<std::uint32_t>(
-      d->program_resources.eventStackMap().valueSize());
+      d->program_resources.event_stack_map->valueSize());
 
   builder.CreateStore(builder.getInt32(event_entry_size), event_header_field);
 
@@ -443,8 +360,10 @@ SyscallTracepoint::generateEnterFunction(BPFProgramWriter &bpf_prog_writer) {
   event_header_field = builder.CreateGEP(
       event_header, {builder.getInt32(0), builder.getInt32(field_index)});
 
-  auto event_identifier = d->enter_event->eventIdentifier();
-  builder.CreateStore(builder.getInt32(event_identifier), event_header_field);
+  auto event_identifier =
+      builder.getInt32(d->event_data.enter_event->identifier());
+
+  builder.CreateStore(event_identifier, event_header_field);
 
   ++field_index;
 
@@ -503,13 +422,18 @@ SyscallTracepoint::generateEnterFunction(BPFProgramWriter &bpf_prog_writer) {
   auto event_data = builder.CreateGEP(
       event_stack_ptr, {builder.getInt32(0), builder.getInt32(1)});
 
-  auto function_argument = enter_event_function->arg_begin();
-  auto enter_event_struct = d->enter_event->structure();
+  // Tracepoints always start with a header made of 5 fields, while Kprobes
+  // use the pt_regs structure
+  std::uint32_t base_struct_index{0U};
+  if (d->event_data.program_type == BPFProgramWriter::ProgramType::Tracepoint) {
+    base_struct_index = 5U;
+  }
 
-  for (std::uint32_t source_index = 5U;
-       source_index < enter_event_struct.size(); ++source_index) {
+  for (std::uint32_t source_index = base_struct_index;
+       source_index < d->event_data.enter_structure.size(); ++source_index) {
 
-    const auto &enter_struct_field = enter_event_struct.at(source_index);
+    const auto &enter_struct_field =
+        d->event_data.enter_structure.at(source_index);
 
     auto param_bb = llvm::BasicBlock::Create(
         context, "capture_" + enter_struct_field.name, enter_event_function);
@@ -517,17 +441,37 @@ SyscallTracepoint::generateEnterFunction(BPFProgramWriter &bpf_prog_writer) {
     builder.CreateBr(param_bb);
     builder.SetInsertPoint(param_bb);
 
-    auto source_ptr =
-        builder.CreateGEP(function_argument, {builder.getInt32(0),
-                                              builder.getInt32(source_index)});
-
-    auto value = builder.CreateLoad(source_ptr);
-
-    auto destination_index = source_index - 5U;
-
+    auto destination_index = source_index - base_struct_index;
     auto destination_ptr = builder.CreateGEP(
         event_data, {builder.getInt32(0), builder.getInt32(destination_index)});
 
+    llvm::Value *source_ptr = nullptr;
+    if (d->event_data.program_type ==
+        BPFProgramWriter::ProgramType::Tracepoint) {
+      auto function_argument = enter_event_function->arg_begin();
+
+      source_ptr = builder.CreateGEP(
+          function_argument,
+          {builder.getInt32(0), builder.getInt32(source_index)});
+
+    } else {
+      auto pt_regs_ptr = enter_event_function->arg_begin();
+
+      if (d->event_data.program_type == BPFProgramWriter::ProgramType::Kprobe) {
+        // TODO: overwrite pt_regs_ptr with the user pt_regs
+      }
+
+      auto source_ptr_exp = getRegisterForParameterIndex(
+          builder, pt_regs_ptr, source_index, destination_ptr->getType());
+
+      if (!source_ptr_exp.succeeded()) {
+        return source_ptr_exp.error();
+      }
+
+      source_ptr = source_ptr_exp.takeValue();
+    }
+
+    auto value = builder.CreateLoad(source_ptr);
     builder.CreateStore(value, destination_ptr);
   }
 
@@ -535,7 +479,7 @@ SyscallTracepoint::generateEnterFunction(BPFProgramWriter &bpf_prog_writer) {
   // Store the event data we collected for later
   //
 
-  bpf_syscall_interface.mapUpdateElem(d->program_resources.eventMap().fd(),
+  bpf_syscall_interface.mapUpdateElem(d->program_resources.event_map->fd(),
                                       event_stack_ptr, event_entry_key,
                                       BPF_ANY);
 
@@ -561,13 +505,12 @@ SyscallTracepoint::generateEnterFunction(BPFProgramWriter &bpf_prog_writer) {
 }
 
 SuccessOrStringError
-SyscallTracepoint::initializeExitFunction(BPFProgramWriter &bpf_prog_writer) {
+FunctionTracer::initializeExitFunction(BPFProgramWriter &bpf_prog_writer) {
   auto &builder = bpf_prog_writer.builder();
   auto &context = bpf_prog_writer.context();
 
   // Create the function
   auto event_function_exp = bpf_prog_writer.getExitFunction();
-
   if (!event_function_exp.succeeded()) {
     return event_function_exp.error();
   }
@@ -591,7 +534,6 @@ SyscallTracepoint::initializeExitFunction(BPFProgramWriter &bpf_prog_writer) {
   auto &bpf_syscall_interface = bpf_prog_writer.bpfSyscallInterface();
 
   auto current_pid_tgid = bpf_syscall_interface.getCurrentPidTgid();
-
   builder.CreateStore(current_pid_tgid, event_entry_key);
 
   auto event_entry_type_exp = bpf_prog_writer.getEventEntryType();
@@ -601,8 +543,7 @@ SyscallTracepoint::initializeExitFunction(BPFProgramWriter &bpf_prog_writer) {
 
   auto event_entry_type = event_entry_type_exp.takeValue();
   auto event_entry_type_ptr = event_entry_type->getPointerTo();
-
-  auto event_map_fd = d->program_resources.eventMap().fd();
+  auto event_map_fd = d->program_resources.event_map->fd();
 
   auto event_entry = bpf_syscall_interface.mapLookupElem(
       event_map_fd, event_entry_key, event_entry_type_ptr);
@@ -661,7 +602,7 @@ SyscallTracepoint::initializeExitFunction(BPFProgramWriter &bpf_prog_writer) {
   // Acquire the buffer stack
   builder.SetInsertPoint(acquire_buffer_stack_bb);
 
-  auto buffer_stack_map_fd = d->program_resources.bufferStackMap().fd();
+  auto buffer_stack_map_fd = d->program_resources.buffer_stack_map->fd();
 
   auto buffer_storage_stack = bpf_syscall_interface.mapLookupElem(
       buffer_stack_map_fd, buffer_storage_entry_key, builder.getInt8PtrTy());
@@ -689,33 +630,47 @@ SyscallTracepoint::initializeExitFunction(BPFProgramWriter &bpf_prog_writer) {
   // Fill in the the exit code of the function
   builder.SetInsertPoint(update_exit_code_bb);
 
-  auto exit_event_struct = d->exit_event->structure();
+  llvm::Value *exit_code_value{nullptr};
 
-  // clang-format off
-  auto exit_code_it = std::find_if(
-    exit_event_struct.begin(),
-    exit_event_struct.end(),
+  if (d->event_data.program_type == BPFProgramWriter::ProgramType::Tracepoint) {
+    // clang-format off
+    auto exit_code_it = std::find_if(
+      d->event_data.exit_structure.begin(),
+      d->event_data.exit_structure.end(),
 
-    [](const auto &structure_field) -> bool {
-      return structure_field.name == "ret";
+      [](const auto &structure_field) -> bool {
+        return structure_field.name == "ret";
+      }
+    );
+    // clang-format on
+
+    if (exit_code_it == d->event_data.exit_structure.end()) {
+      return StringError::create(
+          "Failed to locate the tracepoint syscall exit code");
     }
-  );
-  // clang-format on
 
-  if (exit_code_it == exit_event_struct.end()) {
-    return StringError::create("Failed to locate the syscall exit code");
+    auto exit_code_index = static_cast<std::uint32_t>(
+        exit_code_it - d->event_data.exit_structure.begin());
+
+    auto exit_code_struct_index = builder.getInt32(exit_code_index);
+
+    auto exit_code =
+        builder.CreateGEP(exit_event_function->arg_begin(),
+                          {builder.getInt32(0), exit_code_struct_index});
+
+    exit_code_value = builder.CreateLoad(exit_code);
+
+  } else {
+    auto exit_code_exp = getPtRegsParameterFromName(
+        builder, exit_event_function->arg_begin(), "rax");
+
+    if (!exit_code_exp.succeeded()) {
+      return StringError::create("Failed to locate the syscall exit code");
+    }
+
+    auto exit_code = exit_code_exp.takeValue();
+    exit_code_value = builder.CreateLoad(exit_code);
   }
-
-  auto exit_code_index =
-      static_cast<std::uint32_t>(exit_code_it - exit_event_struct.begin());
-
-  auto exit_code_struct_index = builder.getInt32(exit_code_index);
-
-  auto exit_code =
-      builder.CreateGEP(exit_event_function->arg_begin(),
-                        {builder.getInt32(0), exit_code_struct_index});
-
-  auto exit_code_value = builder.CreateLoad(exit_code);
 
   auto event_header = builder.CreateGEP(
       event_entry, {builder.getInt32(0), builder.getInt32(0)});
@@ -736,7 +691,7 @@ SyscallTracepoint::initializeExitFunction(BPFProgramWriter &bpf_prog_writer) {
 }
 
 SuccessOrStringError
-SyscallTracepoint::finalizeExitFunction(BPFProgramWriter &bpf_prog_writer) {
+FunctionTracer::finalizeExitFunction(BPFProgramWriter &bpf_prog_writer) {
   // Make sure the event entry is defined; it's what we have to write
   auto value_exp = bpf_prog_writer.value("event_entry");
   if (!value_exp.succeeded()) {
@@ -746,14 +701,13 @@ SyscallTracepoint::finalizeExitFunction(BPFProgramWriter &bpf_prog_writer) {
   auto event_entry = value_exp.takeValue();
 
   auto event_entry_size = static_cast<std::uint32_t>(
-      d->program_resources.eventStackMap().valueSize());
+      d->program_resources.event_stack_map->valueSize());
 
   // Get the exit function
   auto &builder = bpf_prog_writer.builder();
   auto &context = bpf_prog_writer.context();
 
   auto exit_function_exp = bpf_prog_writer.getExitFunction();
-
   if (!exit_function_exp.succeeded()) {
     return exit_function_exp.error();
   }
@@ -769,9 +723,7 @@ SyscallTracepoint::finalizeExitFunction(BPFProgramWriter &bpf_prog_writer) {
 
   // Send the event entry through perf_event
   auto perf_event_array_fd = d->perf_event_array.fd();
-
   auto bpf_context = exit_function->arg_begin();
-
   auto &bpf_syscall_interface = bpf_prog_writer.bpfSyscallInterface();
 
   bpf_syscall_interface.perfEventOutput(bpf_context, perf_event_array_fd,
@@ -799,81 +751,158 @@ SyscallTracepoint::finalizeExitFunction(BPFProgramWriter &bpf_prog_writer) {
   return {};
 }
 
-StringErrorOr<std::vector<std::string>>
-SyscallTracepoint::getTracepointEnableSwitchList() {
-
-  std::vector<std::string> tracepoint_switch_list;
-
-  auto switch_path_exp =
-      d->enter_event->path(ebpf::TracepointEvent::PathType::EnableSwitch);
-
-  if (!switch_path_exp.succeeded()) {
-    return switch_path_exp.error();
-  }
-
-  tracepoint_switch_list.push_back(switch_path_exp.takeValue());
-
-  switch_path_exp =
-      d->exit_event->path(ebpf::TracepointEvent::PathType::EnableSwitch);
-
-  if (!switch_path_exp.succeeded()) {
-    return switch_path_exp.error();
-  }
-
-  tracepoint_switch_list.push_back(switch_path_exp.takeValue());
-
-  return tracepoint_switch_list;
-}
-
-SuccessOrStringError SyscallTracepoint::enableTracepoints() {
-  auto tracepoint_switch_list_exp = getTracepointEnableSwitchList();
-
-  if (!tracepoint_switch_list_exp.succeeded()) {
-    return tracepoint_switch_list_exp.error();
-  }
-
-  auto tracepoint_switch_list = tracepoint_switch_list_exp.takeValue();
-
-  for (const auto &tracepoint_switch : tracepoint_switch_list) {
-    auto switch_file = std::fstream(tracepoint_switch, std::ios::out);
-    switch_file << "1";
-
-    if (!switch_file) {
-      return StringError::create("Failed to write to the switch file");
-    }
-  }
-
-  return {};
-}
-
-SuccessOrStringError SyscallTracepoint::disableTracepoints() {
-  auto tracepoint_switch_list_exp = getTracepointEnableSwitchList();
-
-  if (!tracepoint_switch_list_exp.succeeded()) {
-    return tracepoint_switch_list_exp.error();
-  }
-
-  auto tracepoint_switch_list = tracepoint_switch_list_exp.takeValue();
-
-  for (const auto &tracepoint_switch : tracepoint_switch_list) {
-    auto switch_file = std::fstream(tracepoint_switch, std::ios::out);
-    switch_file << "0";
-
-    if (!switch_file) {
-      return StringError::create("Failed to write to the switch file");
-    }
-  }
-
-  return {};
-}
-
-StringErrorOr<ISyscallTracepoint::Ref> ISyscallTracepoint::create(
-    const std::string &syscall_name, IBufferStorage &buffer_storage,
+StringErrorOr<IFunctionTracer::Ref>
+IFunctionTracer::createFromSyscallTracepoint(
+    const std::string &name, IBufferStorage &buffer_storage,
     ebpf::PerfEventArray &perf_event_array, std::size_t event_map_size) {
 
+  initializeSerializerFactoryHelper();
+
+  FunctionTracer::EventData event_data;
+  event_data.program_type = BPFProgramWriter::ProgramType::Tracepoint;
+  event_data.name = name;
+
+  // Create the enter tracepoint event
+  auto event_name = kEnterEventNamePrefix + name;
+
+  auto tracepoint_desc_exp =
+      ebpf::TracepointDescriptor::create(kSyscallsEventCategory, event_name);
+
+  if (!tracepoint_desc_exp.succeeded()) {
+    throw tracepoint_desc_exp.error();
+  }
+
+  auto enter_tracepoint_desc = tracepoint_desc_exp.takeValue();
+  event_data.enter_structure = enter_tracepoint_desc->structure();
+
+  event_name = kSyscallsEventCategory + "/" + event_name;
+  auto perf_event_exp = ebpf::IPerfEvent::createTracepoint(
+      event_name, enter_tracepoint_desc->eventIdentifier());
+
+  if (!perf_event_exp.succeeded()) {
+    throw perf_event_exp.error();
+  }
+
+  event_data.enter_event = perf_event_exp.takeValue();
+
+  // Create the exit tracepoint event
+  event_name = kExitEventNamePrefix + name;
+
+  tracepoint_desc_exp =
+      ebpf::TracepointDescriptor::create(kSyscallsEventCategory, event_name);
+
+  if (!tracepoint_desc_exp.succeeded()) {
+    throw tracepoint_desc_exp.error();
+  }
+
+  auto exit_tracepoint_desc = tracepoint_desc_exp.takeValue();
+  event_data.exit_structure = exit_tracepoint_desc->structure();
+
+  event_name = kSyscallsEventCategory + "/" + event_name;
+  perf_event_exp = ebpf::IPerfEvent::createTracepoint(
+      event_name, exit_tracepoint_desc->eventIdentifier());
+
+  if (!perf_event_exp.succeeded()) {
+    throw perf_event_exp.error();
+  }
+
+  event_data.exit_event = perf_event_exp.takeValue();
+
+  // Obtain a syscall serializer
+  auto serializer_ref_exp = createSerializer(name);
+  if (!serializer_ref_exp.succeeded()) {
+    throw serializer_ref_exp.error();
+  }
+
+  auto serializer_ref = serializer_ref_exp.takeValue();
+
   try {
-    return Ref(new SyscallTracepoint(syscall_name, buffer_storage,
-                                     perf_event_array, event_map_size));
+    return Ref(new FunctionTracer(std::move(event_data),
+                                  std::move(serializer_ref), event_map_size,
+                                  buffer_storage, perf_event_array));
+
+  } catch (const std::bad_alloc &) {
+    return StringError::create("Memory allocation failure");
+
+  } catch (const StringError &error) {
+    return error;
+  }
+}
+
+StringErrorOr<IFunctionTracer::Ref> IFunctionTracer::createFromKprobe(
+    const std::string &name, const ebpf::Structure &args,
+    IBufferStorage &buffer_storage, ebpf::PerfEventArray &perf_event_array,
+    std::size_t event_map_size, IFunctionSerializer::Ref serializer) {
+
+  FunctionTracer::EventData event_data;
+  event_data.program_type = BPFProgramWriter::ProgramType::Kprobe;
+  event_data.name = name;
+  event_data.enter_structure = args;
+
+  auto identifier = generateKprobeIdentifier();
+
+  auto event_exp = ebpf::IPerfEvent::createKprobe(name, false, identifier);
+  if (!event_exp.succeeded()) {
+    return event_exp.error();
+  }
+
+  event_data.enter_event = event_exp.takeValue();
+
+  event_exp = ebpf::IPerfEvent::createKprobe(name, true, identifier);
+  if (!event_exp.succeeded()) {
+    return event_exp.error();
+  }
+
+  event_data.exit_event = event_exp.takeValue();
+
+  try {
+    return Ref(new FunctionTracer(std::move(event_data), std::move(serializer),
+                                  event_map_size, buffer_storage,
+                                  perf_event_array));
+
+  } catch (const std::bad_alloc &) {
+    return StringError::create("Memory allocation failure");
+
+  } catch (const StringError &error) {
+    return error;
+  }
+}
+
+StringErrorOr<IFunctionTracer::Ref> IFunctionTracer::createFromUprobe(
+    const std::string &name, const std::string &path,
+    const ebpf::Structure &args, IBufferStorage &buffer_storage,
+    ebpf::PerfEventArray &perf_event_array, std::size_t event_map_size,
+    IFunctionSerializer::Ref serializer) {
+
+  initializeSerializerFactoryHelper();
+
+  FunctionTracer::EventData event_data;
+  event_data.program_type = BPFProgramWriter::ProgramType::Uprobe;
+  event_data.name = name;
+  event_data.enter_structure = args;
+
+  auto identifier = generateKprobeIdentifier();
+
+  auto event_exp =
+      ebpf::IPerfEvent::createUprobe(name, path, false, identifier);
+
+  if (!event_exp.succeeded()) {
+    return event_exp.error();
+  }
+
+  event_data.enter_event = event_exp.takeValue();
+
+  event_exp = ebpf::IPerfEvent::createUprobe(name, path, true, identifier);
+  if (!event_exp.succeeded()) {
+    return event_exp.error();
+  }
+
+  event_data.exit_event = event_exp.takeValue();
+
+  try {
+    return Ref(new FunctionTracer(std::move(event_data), std::move(serializer),
+                                  event_map_size, buffer_storage,
+                                  perf_event_array));
 
   } catch (const std::bad_alloc &) {
     return StringError::create("Memory allocation failure");
