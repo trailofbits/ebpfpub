@@ -30,9 +30,9 @@ public:
 
   virtual void insert(IFunctionTracer::Ref syscall_tracepoint) = 0;
 
-  virtual SuccessOrStringError
-  exec(std::atomic_bool &terminate,
-       void (*callback)(const IFunctionSerializer::EventList &)) = 0;
+  using Callback = std::function<void(const IFunctionSerializer::EventList &)>;
+  virtual SuccessOrStringError exec(std::atomic_bool &terminate,
+                                    const Callback &callback) = 0;
 
   IPerfEventReader(const IPerfEventReader &) = delete;
   IPerfEventReader &operator=(const IPerfEventReader &) = delete;

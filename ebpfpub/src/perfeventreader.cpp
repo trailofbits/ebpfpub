@@ -36,9 +36,8 @@ void PerfEventReader::insert(IFunctionTracer::Ref syscall_tracepoint) {
       {event_identifier, std::move(syscall_tracepoint)});
 }
 
-SuccessOrStringError PerfEventReader::exec(
-    std::atomic_bool &terminate,
-    void (*callback)(const IFunctionSerializer::EventList &)) {
+SuccessOrStringError PerfEventReader::exec(std::atomic_bool &terminate,
+                                           const Callback &callback) {
 
   std::vector<std::uint8_t> event_buffer = {};
 
