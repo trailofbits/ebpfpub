@@ -35,6 +35,7 @@ public:
 
   virtual const std::string &name() const override;
   virtual std::uint32_t eventIdentifier() const override;
+  virtual std::string ir() const override;
 
   StringErrorOr<IFunctionSerializer::EventList>
   parseEvents(IBufferReader &buffer_reader) const;

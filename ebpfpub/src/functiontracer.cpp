@@ -73,6 +73,14 @@ std::uint32_t FunctionTracer::eventIdentifier() const {
   return d->event_data.enter_event->identifier();
 }
 
+std::string FunctionTracer::ir() const {
+  std::string output_buffer;
+  llvm::raw_string_ostream output_stream(output_buffer);
+
+  d->llvm_module->print(output_stream, nullptr);
+  return output_buffer;
+}
+
 StringErrorOr<IFunctionSerializer::EventList>
 FunctionTracer::parseEvents(IBufferReader &buffer_reader) const {
   IFunctionSerializer::EventList event_list;

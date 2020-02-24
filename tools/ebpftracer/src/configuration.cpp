@@ -25,6 +25,9 @@ StringErrorOr<UserSettings> parseUserSettings(int argc, char *argv[]) {
   application.add_option("-e,--event_map_size", user_settings.event_map_size,
                          "Amount of entries in the event map (per tracepoint)");
 
+  application.add_flag("-d,--debug", user_settings.debug,
+                       "Dump the LLVM IR before executing the tracer");
+
   try {
     application.parse(argc, argv);
 
