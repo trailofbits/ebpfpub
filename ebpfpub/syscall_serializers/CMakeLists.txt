@@ -15,6 +15,9 @@ function(ebpfpubSrcSyscallSerializers)
     
     include/ebpfpub/serializers/connectsyscallserializer.h
     src/connectsyscallserializer.cpp
+
+    include/ebpfpub/serializers/execvesyscallserializer.h
+    src/execvesyscallserializer.cpp
   )
 
   target_include_directories(syscall_serializers PRIVATE

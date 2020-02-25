@@ -14,22 +14,23 @@
 
 namespace tob::ebpfpub {
 class ConnectSyscallSerializer final : public IFunctionSerializer {
+  struct PrivateData;
+  std::unique_ptr<PrivateData> d;
+
 public:
-  ConnectSyscallSerializer();
+  ConnectSyscallSerializer(IBufferStorage &buffer_storage);
   virtual ~ConnectSyscallSerializer() override;
 
-  virtual const std::string &name() const override;
+  static const std::string name;
+  virtual const std::string &getName() const override;
+  virtual const StageList &stages() const override;
 
   virtual SuccessOrStringError
-  generate(const ebpf::Structure &enter_structure,
+  generate(Stage stage, const ebpf::Structure &enter_structure,
            IBPFProgramWriter &bpf_prog_writer) override;
 
   virtual SuccessOrStringError
   parseEvents(IFunctionSerializer::Event &event, IBufferReader &buffer_reader,
               IBufferStorage &buffer_storage) override;
-
-private:
-  struct PrivateData;
-  std::unique_ptr<PrivateData> d;
 };
 } // namespace tob::ebpfpub

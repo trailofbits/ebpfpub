@@ -47,24 +47,39 @@ bufferStorageEntryToString(std::uint64_t index,
 }
 } // namespace
 
+const std::string GenericSyscallSerializer::name{"generic"};
+
 struct GenericSyscallSerializer::PrivateData final {
   ebpf::Structure enter_structure;
   std::unordered_set<std::string> string_parameter_list;
   bool tracepoint{false};
 };
 
-GenericSyscallSerializer::GenericSyscallSerializer() : d(new PrivateData) {}
+GenericSyscallSerializer::GenericSyscallSerializer(
+    IBufferStorage &buffer_storage)
+    : d(new PrivateData) {
+
+  static_cast<void>(buffer_storage);
+}
 
 GenericSyscallSerializer::~GenericSyscallSerializer() {}
 
-const std::string &GenericSyscallSerializer::name() const {
-  static const std::string kSerializerName{"generic"};
-  return kSerializerName;
+const std::string &GenericSyscallSerializer::getName() const { return name; }
+
+const IFunctionSerializer::StageList &GenericSyscallSerializer::stages() const {
+  static const StageList kStageList = {Stage::Exit};
+  return kStageList;
 }
 
 SuccessOrStringError
-GenericSyscallSerializer::generate(const ebpf::Structure &enter_structure,
+GenericSyscallSerializer::generate(Stage stage,
+                                   const ebpf::Structure &enter_structure,
                                    IBPFProgramWriter &bpf_prog_writer) {
+
+  if (stage != Stage::Exit) {
+    return StringError::create(
+        "An unsupported serializer stage has been invoked");
+  }
 
   // Take the event entry
   auto value_exp = bpf_prog_writer.value("event_entry");
