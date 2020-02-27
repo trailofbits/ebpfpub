@@ -11,6 +11,7 @@
 #include <unordered_map>
 
 #include <ebpfpub/serializers/connectsyscallserializer.h>
+#include <ebpfpub/serializers/execvesyscallserializer.h>
 #include <ebpfpub/serializers/genericsyscallserializer.h>
 
 namespace tob::ebpfpub {
@@ -19,9 +20,11 @@ std::unordered_map<std::string, IFunctionSerializer::Factory>
     kSyscallSerializerFactory;
 
 template <typename Serializer>
-StringErrorOr<IFunctionSerializer::Ref> serializerFactory() {
+StringErrorOr<IFunctionSerializer::Ref>
+serializerFactory(IBufferStorage &buffer_storage) {
+
   try {
-    return IFunctionSerializer::Ref(new Serializer());
+    return IFunctionSerializer::Ref(new Serializer(buffer_storage));
 
   } catch (const std::bad_alloc &) {
     return StringError::create("Memory allocation failure");
@@ -33,14 +36,10 @@ StringErrorOr<IFunctionSerializer::Ref> serializerFactory() {
 
 template <typename Serializer>
 SuccessOrStringError registerSerializerFactory() {
-  std::string name;
-
-  {
-    Serializer serializer;
-    name = serializer.name();
-  }
+  const auto &name = Serializer::name;
 
   if (kSyscallSerializerFactory.find(name) != kSyscallSerializerFactory.end()) {
+
     return StringError::create(
         "The following serializer has been already registered: " + name);
   }
@@ -62,10 +61,16 @@ SuccessOrStringError initializeSerializerFactory() {
     return success_exp.error();
   }
 
+  success_exp = registerSerializerFactory<ExecveSyscallSerializer>();
+  if (success_exp.failed()) {
+    return success_exp.error();
+  }
+
   return {};
 }
 
-StringErrorOr<IFunctionSerializer::Ref> createSerializer(std::string name) {
+StringErrorOr<IFunctionSerializer::Ref>
+createSerializer(std::string name, IBufferStorage &buffer_storage) {
   auto factory_it = kSyscallSerializerFactory.find(name);
   if (factory_it == kSyscallSerializerFactory.end()) {
     name = "generic";
@@ -78,6 +83,6 @@ StringErrorOr<IFunctionSerializer::Ref> createSerializer(std::string name) {
   }
 
   const auto &factory = factory_it->second;
-  return factory();
+  return factory(buffer_storage);
 }
 } // namespace tob::ebpfpub

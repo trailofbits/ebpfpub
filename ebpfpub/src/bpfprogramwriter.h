@@ -49,26 +49,27 @@ public:
   virtual ProgramType programType() const override;
 
   virtual StringErrorOr<llvm::Function *> getExitFunction() override;
+  virtual StringErrorOr<llvm::Function *> getEnterFunction() override;
+
   virtual StringErrorOr<llvm::Type *> getEventEntryType() override;
 
   virtual StringErrorOr<llvm::Value *> value(const std::string &name) override;
 
+  virtual StringErrorOr<llvm::Value *> generateBufferStorageIndex() override;
+  virtual StringErrorOr<llvm::Value *>
+  markBufferStorageIndex(llvm::Value *buffer_storage_index) override;
+
   virtual SuccessOrStringError
   captureString(llvm::Value *string_pointer) override;
+
   virtual SuccessOrStringError captureBuffer(llvm::Value *buffer_pointer,
                                              llvm::Value *buffer_size) override;
 
-  StringErrorOr<llvm::Function *> getEnterFunction();
   StringErrorOr<ProgramResources> initializeProgram(std::size_t event_map_size);
 
   void setValue(const std::string &name, llvm::Value *value);
   void unsetValue(const std::string &name);
   void clearSavedValues();
-
-  StringErrorOr<llvm::Value *> generateBufferStorageIndex();
-
-  StringErrorOr<llvm::Value *>
-  markBufferStorageIndex(llvm::Value *buffer_storage_index);
 
 protected:
   BPFProgramWriter(llvm::Module &module, IBufferStorage &buffer_storage,

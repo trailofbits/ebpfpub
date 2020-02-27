@@ -73,6 +73,14 @@ std::uint32_t FunctionTracer::eventIdentifier() const {
   return d->event_data.enter_event->identifier();
 }
 
+std::string FunctionTracer::ir() const {
+  std::string output_buffer;
+  llvm::raw_string_ostream output_stream(output_buffer);
+
+  d->llvm_module->print(output_stream, nullptr);
+  return output_buffer;
+}
+
 StringErrorOr<IFunctionSerializer::EventList>
 FunctionTracer::parseEvents(IBufferReader &buffer_reader) const {
   IFunctionSerializer::EventList event_list;
@@ -172,28 +180,23 @@ FunctionTracer::FunctionTracer(EventData event_data,
 
   d->program_resources = program_resources_exp.takeValue();
 
-  // Generate the common enter function
-  auto success_exp = generateEnterFunction(bpf_program_writer_impl);
+  // Generate the enter function
+  auto success_exp = initializeEnterFunction(bpf_program_writer_impl);
   if (success_exp.failed()) {
     throw success_exp.error();
   }
 
-  bpf_program_writer_impl.clearSavedValues();
+  success_exp = finalizeEnterFunction(bpf_program_writer_impl);
+  if (success_exp.failed()) {
+    throw success_exp.error();
+  }
 
-  // Initialize the exit function
+  // Generate the exit function
   success_exp = initializeExitFunction(bpf_program_writer_impl);
   if (success_exp.failed()) {
     throw success_exp.error();
   }
 
-  // Use the serializer we have been given to complete the exit function
-  success_exp = d->serializer->generate(d->event_data.enter_structure,
-                                        bpf_program_writer_impl);
-  if (success_exp.failed()) {
-    throw success_exp.error();
-  }
-
-  // Finalize the exit function
   success_exp = finalizeExitFunction(bpf_program_writer_impl);
   if (success_exp.failed()) {
     throw success_exp.error();
@@ -251,11 +254,32 @@ FunctionTracer::FunctionTracer(EventData event_data,
   d->exit_program = program_exp.takeValue();
 }
 
+SuccessOrStringError FunctionTracer::initializeProgramWriter(
+    BPFProgramWriter &bpf_prog_writer, llvm::Value *buffer_storage_entry_key,
+    llvm::Value *event_entry, llvm::Value *buffer_storage_index,
+    llvm::Value *buffer_storage_stack, llvm::Value *scratch_space_32,
+    llvm::Value *scratch_space_64) {
+
+  bpf_prog_writer.clearSavedValues();
+
+  bpf_prog_writer.setValue("buffer_storage_entry_key",
+                           buffer_storage_entry_key);
+
+  bpf_prog_writer.setValue("event_entry", event_entry);
+  bpf_prog_writer.setValue("buffer_storage_index", buffer_storage_index);
+  bpf_prog_writer.setValue("buffer_storage_stack", buffer_storage_stack);
+
+  bpf_prog_writer.setValue("scratch_space_32", scratch_space_32);
+  bpf_prog_writer.setValue("scratch_space_64", scratch_space_64);
+
+  return {};
+}
+
 SuccessOrStringError
-FunctionTracer::generateEnterFunction(BPFProgramWriter &bpf_prog_writer) {
+FunctionTracer::initializeEnterFunction(BPFProgramWriter &bpf_prog_writer) {
+
   auto &builder = bpf_prog_writer.builder();
   auto &context = bpf_prog_writer.context();
-  auto &module = bpf_prog_writer.module();
 
   // Create the function
   auto event_function_exp = bpf_prog_writer.getEnterFunction();
@@ -274,6 +298,17 @@ FunctionTracer::generateEnterFunction(BPFProgramWriter &bpf_prog_writer) {
   // Pre-allocate all buffers
   auto event_entry_key = builder.CreateAlloca(builder.getInt64Ty());
   auto stack_space_key = builder.CreateAlloca(builder.getInt64Ty());
+
+  llvm::Value *buffer_storage_entry_key{nullptr};
+  llvm::Value *scratch_space_32{nullptr};
+  llvm::Value *scratch_space_64{nullptr};
+
+  if (d->serializer->stages().count(IFunctionSerializer::Stage::Enter) > 0U) {
+    buffer_storage_entry_key = builder.CreateAlloca(builder.getInt32Ty());
+
+    scratch_space_32 = builder.CreateAlloca(builder.getInt32Ty());
+    scratch_space_64 = builder.CreateAlloca(builder.getInt64Ty());
+  }
 
   // Automatically filter out this event if it's coming from our PID
   auto process_id = builder.getInt64(static_cast<std::uint64_t>(getpid()));
@@ -475,24 +510,140 @@ FunctionTracer::generateEnterFunction(BPFProgramWriter &bpf_prog_writer) {
     builder.CreateStore(value, destination_ptr);
   }
 
-  //
-  // Store the event data we collected for later
-  //
-
+  // Store the event data we collected inside the event map
   bpf_syscall_interface.mapUpdateElem(d->program_resources.event_map->fd(),
                                       event_stack_ptr, event_entry_key,
                                       BPF_ANY);
 
+  // Initialize the program writer, if required by the serializer
+  bpf_prog_writer.clearSavedValues();
+
+  if (d->serializer->stages().count(IFunctionSerializer::Stage::Enter) > 0U) {
+    /// Get the event entry pointer
+    auto event_map_fd = d->program_resources.event_map->fd();
+
+    auto event_entry = bpf_syscall_interface.mapLookupElem(
+        event_map_fd, event_entry_key, event_entry_type_ptr);
+
+    auto null_event_entry_ptr =
+        llvm::Constant::getNullValue(event_entry->getType());
+
+    auto check_event_entry_ptr_condition =
+        builder.CreateICmpEQ(null_event_entry_ptr, event_entry);
+
+    auto invalid_event_entry_bb = llvm::BasicBlock::Create(
+        context, "invalid_event_entry", enter_event_function);
+
+    auto valid_event_entry_bb = llvm::BasicBlock::Create(
+        context, "valid_event_entry", enter_event_function);
+
+    builder.CreateCondBr(check_event_entry_ptr_condition,
+                         invalid_event_entry_bb, valid_event_entry_bb);
+
+    builder.SetInsertPoint(invalid_event_entry_bb);
+    builder.CreateRet(builder.getInt64(0));
+
+    builder.SetInsertPoint(valid_event_entry_bb);
+
+    // Get the buffer storage index
+    auto &buffer_storage_impl = static_cast<BufferStorage &>(d->buffer_storage);
+
+    builder.CreateStore(builder.getInt32(0), buffer_storage_entry_key);
+
+    auto buffer_storage_index = bpf_syscall_interface.mapLookupElem(
+        buffer_storage_impl.indexMap(), buffer_storage_entry_key,
+        llvm::Type::getInt32PtrTy(context));
+
+    auto null_buffer_storage_index =
+        llvm::Constant::getNullValue(buffer_storage_index->getType());
+
+    auto check_buffer_storage_index_condition =
+        builder.CreateICmpEQ(buffer_storage_index, null_buffer_storage_index);
+
+    auto invalid_buffer_storage_index_bb = llvm::BasicBlock::Create(
+        context, "invalid_buffer_storage_index", enter_event_function);
+
+    auto acquire_buffer_stack_bb = llvm::BasicBlock::Create(
+        context, "acquire_buffer_stack", enter_event_function);
+
+    builder.CreateCondBr(check_buffer_storage_index_condition,
+                         invalid_buffer_storage_index_bb,
+                         acquire_buffer_stack_bb);
+
+    builder.SetInsertPoint(invalid_buffer_storage_index_bb);
+    builder.CreateRet(builder.getInt64(0));
+
+    // Acquire the buffer stack
+    builder.SetInsertPoint(acquire_buffer_stack_bb);
+
+    auto buffer_stack_map_fd = d->program_resources.buffer_stack_map->fd();
+
+    auto buffer_storage_stack = bpf_syscall_interface.mapLookupElem(
+        buffer_stack_map_fd, buffer_storage_entry_key, builder.getInt8PtrTy());
+
+    auto null_buffer_stack =
+        llvm::Constant::getNullValue(buffer_storage_stack->getType());
+
+    auto check_buffer_stack_condition =
+        builder.CreateICmpEQ(buffer_storage_stack, null_buffer_stack);
+
+    auto invalid_buffer_stack_bb = llvm::BasicBlock::Create(
+        context, "invalid_buffer_stack", enter_event_function);
+
+    auto continue_bb =
+        llvm::BasicBlock::Create(context, "continue", enter_event_function);
+
+    builder.CreateCondBr(check_buffer_stack_condition, invalid_buffer_stack_bb,
+                         continue_bb);
+
+    builder.SetInsertPoint(invalid_buffer_stack_bb);
+    builder.CreateRet(builder.getInt64(0));
+
+    builder.SetInsertPoint(continue_bb);
+
+    auto success_exp = initializeProgramWriter(
+        bpf_prog_writer, buffer_storage_entry_key, event_entry,
+        buffer_storage_index, buffer_storage_stack, scratch_space_32,
+        scratch_space_64);
+
+    if (success_exp.failed()) {
+      return success_exp.error();
+    }
+  }
+
+  return {};
+}
+
+SuccessOrStringError
+FunctionTracer::finalizeEnterFunction(BPFProgramWriter &bpf_prog_writer) {
+
+  // Invoke the serializer, if needed
+  if (d->serializer->stages().count(IFunctionSerializer::Stage::Enter) > 0U) {
+    auto success_exp =
+        d->serializer->generate(IFunctionSerializer::Stage::Enter,
+                                d->event_data.enter_structure, bpf_prog_writer);
+
+    if (success_exp.failed()) {
+      return success_exp.error();
+    }
+  }
+
+  // Terminate the function
+  auto &builder = bpf_prog_writer.builder();
   builder.CreateRet(builder.getInt64(0));
 
   //
   // Make sure the module is valid
   //
 
+  auto &module = bpf_prog_writer.module();
+
   std::string error_buffer;
   llvm::raw_string_ostream error_stream(error_buffer);
 
   if (llvm::verifyModule(module, &error_stream) != 0) {
+    error_stream.flush();
+
     std::string error_message = "Module verification failed";
     if (!error_buffer.empty()) {
       error_message += ": " + error_buffer;
@@ -525,10 +676,15 @@ FunctionTracer::initializeExitFunction(BPFProgramWriter &bpf_prog_writer) {
 
   // Allocate all buffers in advance
   auto event_entry_key = builder.CreateAlloca(builder.getInt64Ty());
-
   auto buffer_storage_entry_key = builder.CreateAlloca(builder.getInt32Ty());
-  bpf_prog_writer.setValue("buffer_storage_entry_key",
-                           buffer_storage_entry_key);
+
+  llvm::Value *scratch_space_32{nullptr};
+  llvm::Value *scratch_space_64{nullptr};
+
+  if (d->serializer->stages().count(IFunctionSerializer::Stage::Enter) > 0U) {
+    scratch_space_32 = builder.CreateAlloca(builder.getInt32Ty());
+    scratch_space_64 = builder.CreateAlloca(builder.getInt64Ty());
+  }
 
   // Get the event entry
   auto &bpf_syscall_interface = bpf_prog_writer.bpfSyscallInterface();
@@ -548,8 +704,6 @@ FunctionTracer::initializeExitFunction(BPFProgramWriter &bpf_prog_writer) {
   auto event_entry = bpf_syscall_interface.mapLookupElem(
       event_map_fd, event_entry_key, event_entry_type_ptr);
 
-  bpf_prog_writer.setValue("event_entry", event_entry);
-
   auto null_event_entry_ptr =
       llvm::Constant::getNullValue(event_entry->getType());
 
@@ -559,77 +713,91 @@ FunctionTracer::initializeExitFunction(BPFProgramWriter &bpf_prog_writer) {
   auto invalid_event_entry_bb = llvm::BasicBlock::Create(
       context, "invalid_event_entry", exit_event_function);
 
-  auto acquire_buffer_storage_index_bb = llvm::BasicBlock::Create(
-      context, "acquire_buffer_storage_index", exit_event_function);
+  auto valid_event_entry_bb = llvm::BasicBlock::Create(
+      context, "valid_event_entry", exit_event_function);
 
   builder.CreateCondBr(check_event_entry_ptr_condition, invalid_event_entry_bb,
-                       acquire_buffer_storage_index_bb);
+                       valid_event_entry_bb);
 
   builder.SetInsertPoint(invalid_event_entry_bb);
   builder.CreateRet(builder.getInt64(0));
 
-  // Acquire the buffer storage index
-  builder.SetInsertPoint(acquire_buffer_storage_index_bb);
-  builder.CreateStore(builder.getInt32(0), buffer_storage_entry_key);
+  builder.SetInsertPoint(valid_event_entry_bb);
 
-  auto &buffer_storage_impl = static_cast<BufferStorage &>(d->buffer_storage);
+  // Initialize the program writer, if required by the serializer
+  bpf_prog_writer.clearSavedValues();
 
-  auto buffer_storage_index = bpf_syscall_interface.mapLookupElem(
-      buffer_storage_impl.indexMap(), buffer_storage_entry_key,
-      llvm::Type::getInt32PtrTy(context));
+  if (d->serializer->stages().count(IFunctionSerializer::Stage::Exit) == 0U) {
+    bpf_prog_writer.setValue("event_entry", event_entry);
 
-  bpf_prog_writer.setValue("buffer_storage_index", buffer_storage_index);
+  } else {
+    // Acquire the buffer storage index
+    builder.CreateStore(builder.getInt32(0), buffer_storage_entry_key);
 
-  auto null_buffer_storage_index =
-      llvm::Constant::getNullValue(buffer_storage_index->getType());
+    auto &buffer_storage_impl = static_cast<BufferStorage &>(d->buffer_storage);
 
-  auto check_buffer_storage_index_condition =
-      builder.CreateICmpEQ(buffer_storage_index, null_buffer_storage_index);
+    auto buffer_storage_index = bpf_syscall_interface.mapLookupElem(
+        buffer_storage_impl.indexMap(), buffer_storage_entry_key,
+        llvm::Type::getInt32PtrTy(context));
 
-  auto invalid_buffer_storage_index_bb = llvm::BasicBlock::Create(
-      context, "invalid_buffer_storage_index", exit_event_function);
+    auto null_buffer_storage_index =
+        llvm::Constant::getNullValue(buffer_storage_index->getType());
 
-  auto acquire_buffer_stack_bb = llvm::BasicBlock::Create(
-      context, "acquire_buffer_stack", exit_event_function);
+    auto check_buffer_storage_index_condition =
+        builder.CreateICmpEQ(buffer_storage_index, null_buffer_storage_index);
 
-  builder.CreateCondBr(check_buffer_storage_index_condition,
-                       invalid_buffer_storage_index_bb,
-                       acquire_buffer_stack_bb);
+    auto invalid_buffer_storage_index_bb = llvm::BasicBlock::Create(
+        context, "invalid_buffer_storage_index", exit_event_function);
 
-  builder.SetInsertPoint(invalid_buffer_storage_index_bb);
-  builder.CreateRet(builder.getInt64(0));
+    auto acquire_buffer_stack_bb = llvm::BasicBlock::Create(
+        context, "acquire_buffer_stack", exit_event_function);
 
-  // Acquire the buffer stack
-  builder.SetInsertPoint(acquire_buffer_stack_bb);
+    builder.CreateCondBr(check_buffer_storage_index_condition,
+                         invalid_buffer_storage_index_bb,
+                         acquire_buffer_stack_bb);
 
-  auto buffer_stack_map_fd = d->program_resources.buffer_stack_map->fd();
+    builder.SetInsertPoint(invalid_buffer_storage_index_bb);
+    builder.CreateRet(builder.getInt64(0));
 
-  auto buffer_storage_stack = bpf_syscall_interface.mapLookupElem(
-      buffer_stack_map_fd, buffer_storage_entry_key, builder.getInt8PtrTy());
+    // Acquire the buffer stack
+    builder.SetInsertPoint(acquire_buffer_stack_bb);
 
-  bpf_prog_writer.setValue("buffer_storage_stack", buffer_storage_stack);
+    auto buffer_stack_map_fd = d->program_resources.buffer_stack_map->fd();
 
-  auto null_buffer_stack =
-      llvm::Constant::getNullValue(buffer_storage_stack->getType());
+    auto buffer_storage_stack = bpf_syscall_interface.mapLookupElem(
+        buffer_stack_map_fd, buffer_storage_entry_key, builder.getInt8PtrTy());
 
-  auto check_buffer_stack_condition =
-      builder.CreateICmpEQ(buffer_storage_stack, null_buffer_stack);
+    auto null_buffer_stack =
+        llvm::Constant::getNullValue(buffer_storage_stack->getType());
 
-  auto invalid_buffer_stack_bb = llvm::BasicBlock::Create(
-      context, "invalid_buffer_stack", exit_event_function);
+    auto check_buffer_stack_condition =
+        builder.CreateICmpEQ(buffer_storage_stack, null_buffer_stack);
 
-  auto update_exit_code_bb = llvm::BasicBlock::Create(
-      context, "update_exit_code", exit_event_function);
+    auto invalid_buffer_stack_bb = llvm::BasicBlock::Create(
+        context, "invalid_buffer_stack", exit_event_function);
 
-  builder.CreateCondBr(check_buffer_stack_condition, invalid_buffer_stack_bb,
-                       update_exit_code_bb);
+    auto valid_buffer_stack_bb = llvm::BasicBlock::Create(
+        context, "valid_buffer_stack", exit_event_function);
 
-  builder.SetInsertPoint(invalid_buffer_stack_bb);
-  builder.CreateRet(builder.getInt64(0));
+    builder.CreateCondBr(check_buffer_stack_condition, invalid_buffer_stack_bb,
+                         valid_buffer_stack_bb);
+
+    builder.SetInsertPoint(invalid_buffer_stack_bb);
+    builder.CreateRet(builder.getInt64(0));
+
+    builder.SetInsertPoint(valid_buffer_stack_bb);
+
+    auto success_exp = initializeProgramWriter(
+        bpf_prog_writer, buffer_storage_entry_key, event_entry,
+        buffer_storage_index, buffer_storage_stack, scratch_space_32,
+        scratch_space_64);
+
+    if (success_exp.failed()) {
+      return success_exp.error();
+    }
+  }
 
   // Fill in the the exit code of the function
-  builder.SetInsertPoint(update_exit_code_bb);
-
   llvm::Value *exit_code_value{nullptr};
 
   if (d->event_data.program_type == BPFProgramWriter::ProgramType::Tracepoint) {
@@ -692,10 +860,21 @@ FunctionTracer::initializeExitFunction(BPFProgramWriter &bpf_prog_writer) {
 
 SuccessOrStringError
 FunctionTracer::finalizeExitFunction(BPFProgramWriter &bpf_prog_writer) {
+
+  if (d->serializer->stages().count(IFunctionSerializer::Stage::Exit) > 0U) {
+    auto success_exp =
+        d->serializer->generate(IFunctionSerializer::Stage::Exit,
+                                d->event_data.enter_structure, bpf_prog_writer);
+
+    if (success_exp.failed()) {
+      return success_exp.error();
+    }
+  }
+
   // Make sure the event entry is defined; it's what we have to write
   auto value_exp = bpf_prog_writer.value("event_entry");
   if (!value_exp.succeeded()) {
-    return StringError::create("The event_entry value is not set");
+    return StringError::create("The event_entry value is not setx");
   }
 
   auto event_entry = value_exp.takeValue();
@@ -740,6 +919,8 @@ FunctionTracer::finalizeExitFunction(BPFProgramWriter &bpf_prog_writer) {
   llvm::raw_string_ostream error_stream(error_buffer);
 
   if (llvm::verifyModule(module, &error_stream) != 0) {
+    error_stream.flush();
+
     std::string error_message = "Module verification failed";
     if (!error_buffer.empty()) {
       error_message += ": " + error_buffer;
@@ -809,7 +990,7 @@ IFunctionTracer::createFromSyscallTracepoint(
   event_data.exit_event = perf_event_exp.takeValue();
 
   // Obtain a syscall serializer
-  auto serializer_ref_exp = createSerializer(name);
+  auto serializer_ref_exp = createSerializer(name, buffer_storage);
   if (!serializer_ref_exp.succeeded()) {
     throw serializer_ref_exp.error();
   }

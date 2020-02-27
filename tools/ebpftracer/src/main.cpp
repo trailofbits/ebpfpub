@@ -40,6 +40,7 @@ void printEventHeader(
 void printEventOptionalVariant(
     const tob::ebpfpub::IFunctionSerializer::Event::OptionalVariant
         &opt_variant) {
+
   if (!opt_variant.has_value()) {
     std::cout << "<NULL>";
     return;
@@ -182,6 +183,9 @@ int main(int argc, char *argv[]) {
     }
 
     function_tracer = function_tracer_exp.takeValue();
+    if (user_settings.debug) {
+      std::cerr << function_tracer->ir() << "\n\n\n";
+    }
 
     std::cout << " > " << syscall_name << "\n";
     perf_event_reader->insert(std::move(function_tracer));

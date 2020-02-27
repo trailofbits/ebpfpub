@@ -14,5 +14,6 @@
 namespace tob::ebpfpub {
 SuccessOrStringError initializeSerializerFactory();
 
-StringErrorOr<IFunctionSerializer::Ref> createSerializer(std::string name);
+StringErrorOr<IFunctionSerializer::Ref>
+createSerializer(std::string name, IBufferStorage &buffer_storage);
 } // namespace tob::ebpfpub

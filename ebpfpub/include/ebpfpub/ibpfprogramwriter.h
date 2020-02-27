@@ -33,11 +33,18 @@ public:
   virtual ProgramType programType() const = 0;
 
   virtual StringErrorOr<llvm::Function *> getExitFunction() = 0;
+  virtual StringErrorOr<llvm::Function *> getEnterFunction() = 0;
+
   virtual StringErrorOr<llvm::Type *> getEventEntryType() = 0;
 
   virtual StringErrorOr<llvm::Value *> value(const std::string &name) = 0;
 
+  virtual StringErrorOr<llvm::Value *> generateBufferStorageIndex() = 0;
+  virtual StringErrorOr<llvm::Value *>
+  markBufferStorageIndex(llvm::Value *buffer_storage_index) = 0;
+
   virtual SuccessOrStringError captureString(llvm::Value *string_pointer) = 0;
+
   virtual SuccessOrStringError captureBuffer(llvm::Value *buffer_pointer,
                                              llvm::Value *buffer_size) = 0;
 

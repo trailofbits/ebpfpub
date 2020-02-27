@@ -12,8 +12,6 @@
 
 namespace tob::ebpfpub {
 namespace {
-static const std::string kSerializerName{"readline"};
-
 StringErrorOr<std::string>
 bufferStorageEntryToString(std::uint64_t index,
                            IBufferStorage &buffer_storage) {
@@ -49,6 +47,8 @@ bufferStorageEntryToString(std::uint64_t index,
 }
 } // namespace
 
+const std::string ReadlineSerializer::name{"readline"};
+
 StringErrorOr<IFunctionSerializer::Ref> ReadlineSerializer::create() {
   try {
     return Ref(new ReadlineSerializer());
@@ -63,11 +63,21 @@ StringErrorOr<IFunctionSerializer::Ref> ReadlineSerializer::create() {
 
 ReadlineSerializer::~ReadlineSerializer() {}
 
-const std::string &ReadlineSerializer::name() const { return kSerializerName; }
+const std::string &ReadlineSerializer::getName() const { return name; }
+
+const IFunctionSerializer::StageList &ReadlineSerializer::stages() const {
+  static const StageList kStageList{Stage::Exit};
+  return kStageList;
+}
 
 SuccessOrStringError
-ReadlineSerializer::generate(const ebpf::Structure &enter_structure,
+ReadlineSerializer::generate(Stage stage,
+                             const ebpf::Structure &enter_structure,
                              IBPFProgramWriter &bpf_prog_writer) {
+
+  if (stage != Stage::Exit) {
+    return {};
+  }
 
   // Take the event entry
   auto value_exp = bpf_prog_writer.value("event_entry");

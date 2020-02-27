@@ -10,13 +10,16 @@
 
 #include <memory>
 
-#include <ebpfpub/ifunctiontracer.h>
+#include <ebpfpub/ifunctionserializer.h>
 
 namespace tob::ebpfpub {
-class ReadlineSerializer final : public IFunctionSerializer {
+class ExecveSyscallSerializer final : public IFunctionSerializer {
+  struct PrivateData;
+  std::unique_ptr<PrivateData> d;
+
 public:
-  static StringErrorOr<Ref> create();
-  virtual ~ReadlineSerializer() override;
+  ExecveSyscallSerializer(IBufferStorage &buffer_storage);
+  virtual ~ExecveSyscallSerializer() override;
 
   static const std::string name;
   virtual const std::string &getName() const override;
@@ -27,10 +30,7 @@ public:
            IBPFProgramWriter &bpf_prog_writer) override;
 
   virtual SuccessOrStringError
-  parseEvents(Event &event, IBufferReader &buffer_reader,
+  parseEvents(IFunctionSerializer::Event &event, IBufferReader &buffer_reader,
               IBufferStorage &buffer_storage) override;
-
-private:
-  ReadlineSerializer();
 };
 } // namespace tob::ebpfpub

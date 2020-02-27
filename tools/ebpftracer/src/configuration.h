@@ -13,6 +13,7 @@ struct UserSettings final {
   std::size_t buffer_count{4096};
   std::size_t perf_event_array_size{5U};
   std::size_t event_map_size{1024};
+  bool debug{false};
 };
 
 StringErrorOr<UserSettings> parseUserSettings(int argc, char *argv[]);

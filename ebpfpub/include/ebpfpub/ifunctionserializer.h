@@ -8,6 +8,8 @@
 
 #pragma once
 
+#include <unordered_set>
+
 #include <ebpfpub/ibpfprogramwriter.h>
 #include <ebpfpub/ibufferreader.h>
 #include <ebpfpub/ibufferstorage.h>
@@ -49,17 +51,22 @@ public:
     FieldMap field_map;
   };
 
+  enum class Stage { Enter, Exit };
+
+  using StageList = std::unordered_set<Stage>;
   using EventList = std::vector<Event>;
 
   using Ref = std::unique_ptr<IFunctionSerializer>;
-  using Factory = StringErrorOr<Ref> (*)();
+  using Factory = StringErrorOr<Ref> (*)(IBufferStorage &buffer_storage);
 
   IFunctionSerializer() = default;
   virtual ~IFunctionSerializer() = default;
 
-  virtual const std::string &name() const = 0;
+  virtual const std::string &getName() const = 0;
+  virtual const StageList &stages() const = 0;
 
-  virtual SuccessOrStringError generate(const ebpf::Structure &enter_structure,
+  virtual SuccessOrStringError generate(Stage stage,
+                                        const ebpf::Structure &enter_structure,
                                         IBPFProgramWriter &bpf_prog_writer) = 0;
 
   virtual SuccessOrStringError parseEvents(Event &event,

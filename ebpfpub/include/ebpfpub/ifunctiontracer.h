@@ -46,6 +46,7 @@ public:
 
   virtual const std::string &name() const = 0;
   virtual std::uint32_t eventIdentifier() const = 0;
+  virtual std::string ir() const = 0;
 
   IFunctionTracer(const IFunctionTracer &) = delete;
   IFunctionTracer &operator=(const IFunctionTracer &) = delete;

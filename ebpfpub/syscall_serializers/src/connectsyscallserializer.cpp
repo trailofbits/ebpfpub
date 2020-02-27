@@ -19,22 +19,37 @@ namespace {
 std::uint32_t kAddressStructSizeLimit{512U};
 }
 
+const std::string ConnectSyscallSerializer::name{"connect"};
+
 struct ConnectSyscallSerializer::PrivateData final {
   ebpf::Structure enter_structure;
 };
 
-ConnectSyscallSerializer::ConnectSyscallSerializer() : d(new PrivateData) {}
+ConnectSyscallSerializer::ConnectSyscallSerializer(
+    IBufferStorage &buffer_storage)
+    : d(new PrivateData) {
+
+  static_cast<void>(buffer_storage);
+}
 
 ConnectSyscallSerializer::~ConnectSyscallSerializer() {}
 
-const std::string &ConnectSyscallSerializer::name() const {
-  static const std::string kSerializerName{"connect"};
-  return kSerializerName;
+const std::string &ConnectSyscallSerializer::getName() const { return name; }
+
+const IFunctionSerializer::StageList &ConnectSyscallSerializer::stages() const {
+  static const StageList kStageList = {Stage::Exit};
+  return kStageList;
 }
 
 SuccessOrStringError
-ConnectSyscallSerializer::generate(const ebpf::Structure &enter_structure,
+ConnectSyscallSerializer::generate(Stage stage,
+                                   const ebpf::Structure &enter_structure,
                                    IBPFProgramWriter &bpf_prog_writer) {
+
+  if (stage != Stage::Exit) {
+    return StringError::create(
+        "An unsupported serializer stage has been invoked");
+  }
 
   // Save the enter event structure
   d->enter_structure = enter_structure;

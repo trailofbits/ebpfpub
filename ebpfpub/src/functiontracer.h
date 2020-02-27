@@ -35,6 +35,7 @@ public:
 
   virtual const std::string &name() const override;
   virtual std::uint32_t eventIdentifier() const override;
+  virtual std::string ir() const override;
 
   StringErrorOr<IFunctionSerializer::EventList>
   parseEvents(IBufferReader &buffer_reader) const;
@@ -47,11 +48,18 @@ private:
                  std::size_t event_map_size, IBufferStorage &buffer_storage,
                  ebpf::PerfEventArray &perf_event_array);
 
-  SuccessOrStringError generateEnterFunction(BPFProgramWriter &bpf_prog_writer);
+  SuccessOrStringError initializeProgramWriter(
+      BPFProgramWriter &bpf_prog_writer, llvm::Value *buffer_storage_entry_key,
+      llvm::Value *event_entry, llvm::Value *buffer_storage_index,
+      llvm::Value *buffer_storage_stack, llvm::Value *scratch_space_32,
+      llvm::Value *scratch_space_64);
+
+  SuccessOrStringError
+  initializeEnterFunction(BPFProgramWriter &bpf_prog_writer);
+  SuccessOrStringError finalizeEnterFunction(BPFProgramWriter &bpf_prog_writer);
 
   SuccessOrStringError
   initializeExitFunction(BPFProgramWriter &bpf_prog_writer);
-
   SuccessOrStringError finalizeExitFunction(BPFProgramWriter &bpf_prog_writer);
 
   friend class IFunctionTracer;

@@ -112,6 +112,15 @@ StringErrorOr<llvm::Function *> BPFProgramWriter::getExitFunction() {
   return function;
 }
 
+StringErrorOr<llvm::Function *> BPFProgramWriter::getEnterFunction() {
+  auto function = module().getFunction("on_syscall_enter");
+  if (function == nullptr) {
+    return StringError::create("The program has not been initialized");
+  }
+
+  return function;
+}
+
 StringErrorOr<llvm::Type *> BPFProgramWriter::getEventEntryType() {
   auto type = module().getTypeByName(kEventEntryTypeName);
   if (type == nullptr) {
@@ -128,6 +137,70 @@ StringErrorOr<llvm::Value *> BPFProgramWriter::value(const std::string &name) {
   }
 
   return saved_value_it->second;
+}
+
+StringErrorOr<llvm::Value *> BPFProgramWriter::generateBufferStorageIndex() {
+  // Get the buffer storage index
+  auto value_exp = value("buffer_storage_index");
+  if (!value_exp.succeeded()) {
+    return StringError::create("The buffer_storage_index value is not set");
+  }
+
+  auto buffer_storage_index = value_exp.takeValue();
+
+  // When generating a new index; we make sure we stay within the
+  // size of the buffer storage
+  auto buffer_index_value = builder().CreateLoad(buffer_storage_index);
+
+  auto next_buffer_index_value = builder().CreateBinOp(
+      llvm::Instruction::Add, buffer_index_value, builder().getInt32(1));
+
+  auto buffer_storage_entry_count =
+      static_cast<std::uint32_t>(d->buffer_storage.bufferCount());
+
+  next_buffer_index_value =
+      builder().CreateBinOp(llvm::Instruction::URem, next_buffer_index_value,
+                            builder().getInt32(buffer_storage_entry_count));
+
+  builder().CreateStore(next_buffer_index_value, buffer_storage_index);
+
+  return next_buffer_index_value;
+}
+
+StringErrorOr<llvm::Value *>
+BPFProgramWriter::markBufferStorageIndex(llvm::Value *buffer_storage_index) {
+  // Get or retrieve the current the processor id
+  auto value_exp = value("current_processor_id");
+  if (!value_exp.succeeded()) {
+    auto current_processor_id = d->bpf_syscall_interface->getSmpProcessorId();
+
+    current_processor_id =
+        builder().CreateZExt(current_processor_id, builder().getInt64Ty());
+
+    current_processor_id = builder().CreateBinOp(
+        llvm::Instruction::Shl, current_processor_id, builder().getInt64(48U));
+
+    current_processor_id =
+        builder().CreateBinOp(llvm::Instruction::Or, current_processor_id,
+                              builder().getInt64(0xFF00000000000000ULL));
+
+    setValue("current_processor_id", current_processor_id);
+    value_exp = current_processor_id;
+  }
+
+  if (!value_exp.succeeded()) {
+    return value_exp.error();
+  }
+
+  auto current_processor_id = value_exp.takeValue();
+
+  auto marked_buffer_index =
+      builder().CreateZExt(buffer_storage_index, builder().getInt64Ty());
+
+  marked_buffer_index = builder().CreateBinOp(
+      llvm::Instruction::Or, marked_buffer_index, current_processor_id);
+
+  return marked_buffer_index;
 }
 
 SuccessOrStringError
@@ -317,15 +390,6 @@ BPFProgramWriter::captureBuffer(llvm::Value *buffer_pointer,
   builder().CreateStore(marked_index, buffer_pointer);
 
   return {};
-}
-
-StringErrorOr<llvm::Function *> BPFProgramWriter::getEnterFunction() {
-  auto function = module().getFunction("on_syscall_enter");
-  if (function == nullptr) {
-    return StringError::create("The program has not been initialized");
-  }
-
-  return function;
 }
 
 StringErrorOr<BPFProgramWriter::ProgramResources>
@@ -612,69 +676,5 @@ BPFProgramWriter::importTracepointDescriptorStructure(
   }
 
   return output;
-}
-
-StringErrorOr<llvm::Value *> BPFProgramWriter::generateBufferStorageIndex() {
-  // Get the buffer storage index
-  auto value_exp = value("buffer_storage_index");
-  if (!value_exp.succeeded()) {
-    return StringError::create("The buffer_storage_index value is not set");
-  }
-
-  auto buffer_storage_index = value_exp.takeValue();
-
-  // When generating a new index; we make sure we stay within the
-  // size of the buffer storage
-  auto buffer_index_value = builder().CreateLoad(buffer_storage_index);
-
-  auto next_buffer_index_value = builder().CreateBinOp(
-      llvm::Instruction::Add, buffer_index_value, builder().getInt32(1));
-
-  auto buffer_storage_entry_count =
-      static_cast<std::uint32_t>(d->buffer_storage.bufferCount());
-
-  next_buffer_index_value =
-      builder().CreateBinOp(llvm::Instruction::URem, next_buffer_index_value,
-                            builder().getInt32(buffer_storage_entry_count));
-
-  builder().CreateStore(next_buffer_index_value, buffer_storage_index);
-
-  return next_buffer_index_value;
-}
-
-StringErrorOr<llvm::Value *>
-BPFProgramWriter::markBufferStorageIndex(llvm::Value *buffer_storage_index) {
-  // Get or retrieve the current the processor id
-  auto value_exp = value("current_processor_id");
-  if (!value_exp.succeeded()) {
-    auto current_processor_id = d->bpf_syscall_interface->getSmpProcessorId();
-
-    current_processor_id =
-        builder().CreateZExt(current_processor_id, builder().getInt64Ty());
-
-    current_processor_id = builder().CreateBinOp(
-        llvm::Instruction::Shl, current_processor_id, builder().getInt64(48U));
-
-    current_processor_id =
-        builder().CreateBinOp(llvm::Instruction::Or, current_processor_id,
-                              builder().getInt64(0xFF00000000000000ULL));
-
-    setValue("current_processor_id", current_processor_id);
-    value_exp = current_processor_id;
-  }
-
-  if (!value_exp.succeeded()) {
-    return value_exp.error();
-  }
-
-  auto current_processor_id = value_exp.takeValue();
-
-  auto marked_buffer_index =
-      builder().CreateZExt(buffer_storage_index, builder().getInt64Ty());
-
-  marked_buffer_index = builder().CreateBinOp(
-      llvm::Instruction::Or, marked_buffer_index, current_processor_id);
-
-  return marked_buffer_index;
 }
 } // namespace tob::ebpfpub
