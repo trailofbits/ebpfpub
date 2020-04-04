@@ -6,7 +6,7 @@
 # the LICENSE file found in the root directory of this source tree.
 #
 
-cmake_minimum_required(VERSION 3.16.3)
+cmake_minimum_required(VERSION 3.14.6)
 
 option(EBPFPUB_ENABLE_TOOLS "Set to ON to build the ebpfpub tools")
 option(EBPFPUB_ENABLE_EXAMPLES "Set to ON to build the ebpfpub examples")
