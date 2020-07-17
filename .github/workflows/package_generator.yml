@@ -55,7 +55,7 @@ jobs:
         echo ::set-output name=CMAKE_BINARY::$(realpath $(find cmake* -type d -name bin)/cmake)
 
     - name: Configure the project (Debug)
-      run: ( cd build && ${{ steps.cmake_installer.outputs.CMAKE_BINARY }} -G Ninja -DEBPF_COMMON_TOOLCHAIN_PATH:PATH=${{ steps.osquery_toolchain_installer.outputs.PATH }} -DCMAKE_BUILD_TYPE:STRING=Debug -DEBPFPUB_ENABLE_TOOLS:BOOL=true -DEBPF_COMMON_ENABLE_TESTS:BOOL=true -DEBPF_COMMON_ENABLE_SANITIZERS:BOOL=true .. )
+      run: ( cd build && ${{ steps.cmake_installer.outputs.CMAKE_BINARY }} -G Ninja -DEBPF_COMMON_TOOLCHAIN_PATH:PATH=${{ steps.osquery_toolchain_installer.outputs.PATH }} -DCMAKE_BUILD_TYPE:STRING=Debug -DEBPFPUB_ENABLE_EXAMPLES:BOOL=true -DEBPF_COMMON_ENABLE_TESTS:BOOL=true -DEBPF_COMMON_ENABLE_SANITIZERS:BOOL=true .. )
 
     - name: Build the project (Debug)
       run: ( cd build && ninja -v )
@@ -67,7 +67,7 @@ jobs:
       run: rm -rf build && mkdir build
 
     - name: Configure the project (Release)
-      run: ( cd build && ${{ steps.cmake_installer.outputs.CMAKE_BINARY }} -G Ninja -DEBPF_COMMON_TOOLCHAIN_PATH:PATH=${{ steps.osquery_toolchain_installer.outputs.PATH }} -DCMAKE_BUILD_TYPE:STRING=Release -DEBPFPUB_ENABLE_TOOLS:BOOL=true -DEBPF_COMMON_ENABLE_TESTS:BOOL=true -DEBPF_COMMON_ENABLE_SANITIZERS:BOOL=false .. )
+      run: ( cd build && ${{ steps.cmake_installer.outputs.CMAKE_BINARY }} -G Ninja -DEBPF_COMMON_TOOLCHAIN_PATH:PATH=${{ steps.osquery_toolchain_installer.outputs.PATH }} -DCMAKE_BUILD_TYPE:STRING=Release -DEBPFPUB_ENABLE_INSTALL:BOOL=true -DEBPFPUB_ENABLE_EXAMPLES:BOOL=true -DEBPF_COMMON_ENABLE_TESTS:BOOL=true -DEBPF_COMMON_ENABLE_SANITIZERS:BOOL=false .. )
 
     - name: Build the project (Release)
       run: ( cd build && ninja -v )
@@ -87,7 +87,6 @@ jobs:
 
     - name: Build the package
       run: ( cd package && ninja -v package )
-
 
     - name: Locate the packages
       id: package_locations

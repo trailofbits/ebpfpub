@@ -83,4 +83,22 @@ getRegisterForParameterIndex(llvm::IRBuilder<> &builder, llvm::Value *pt_regs,
   const auto &register_name = kSyscallParameterIndexToRegisterName64.at(index);
   return getPtRegsParameterFromName(builder, pt_regs, register_name, type);
 }
+
+StringErrorOr<std::uint32_t>
+translateParameterNumberToPtregsIndex(std::uint32_t index) {
+  auto reg_name_it = kSyscallParameterIndexToRegisterName64.find(index);
+  if (reg_name_it == kSyscallParameterIndexToRegisterName64.end()) {
+    return StringError::create("Invalid parameter number");
+  }
+
+  const auto &reg_name = reg_name_it->second;
+
+  auto param_index_it = kParameterNameToPtRegsIndex64.find(reg_name);
+  if (param_index_it == kParameterNameToPtRegsIndex64.end()) {
+    return StringError::create("Invalid register name");
+  }
+
+  auto ptregs_index = static_cast<std::uint32_t>(param_index_it->second);
+  return ptregs_index;
+}
 } // namespace tob::ebpfpub

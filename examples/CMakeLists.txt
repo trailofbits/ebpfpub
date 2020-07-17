@@ -9,7 +9,7 @@
 cmake_minimum_required(VERSION 3.14.6)
 
 function(ebpfpubExamples)
-  add_subdirectory("uprobe_readline_monitor")
+  add_subdirectory("sample1")
 endfunction()
 
 ebpfpubExamples()

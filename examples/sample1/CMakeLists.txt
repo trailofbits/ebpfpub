@@ -7,20 +7,16 @@
 #
 
 cmake_minimum_required(VERSION 3.14.6)
-project("uprobe_readline_monitor")
+project("sample1")
 
-function(ebpfpubExamplesUprobeReadlineMonitor)
-  add_executable(uprobe_readline_monitor
+function(ebpfpubExamplesSample1)
+  add_executable("${PROJECT_NAME}"
     src/main.cpp
-
-    src/readlineserializer.h
-    src/readlineserializer.cpp
   )
 
-  target_link_libraries(uprobe_readline_monitor PRIVATE
+  target_link_libraries("${PROJECT_NAME}" PRIVATE
     ebpfpub
-    thirdparty_cli11
   )
 endfunction()
 
-ebpfpubExamplesUprobeReadlineMonitor()
+ebpfpubExamplesSample1()

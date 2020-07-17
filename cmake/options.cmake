@@ -8,5 +8,5 @@
 
 cmake_minimum_required(VERSION 3.14.6)
 
-option(EBPFPUB_ENABLE_TOOLS "Set to ON to build the ebpfpub tools")
-option(EBPFPUB_ENABLE_EXAMPLES "Set to ON to build the ebpfpub examples")
+option(EBPFPUB_BUILD_EXAMPLES "Build the ebpfpub examples")
+option(EBPFPUB_ENABLE_INSTALL "Enable the install targets")

@@ -9,18 +9,19 @@
 #include "bufferreader.h"
 
 #include <cstring>
-#include <iostream>
 
 namespace tob::ebpfpub {
 namespace {
 template <typename Type>
-Type readType(const std::uint8_t *&buffer, std::size_t &buffer_size,
+Type readType(const std::uint8_t *buffer, const std::size_t &buffer_size,
               std::size_t &bytes_read) {
+
+  if (buffer == nullptr) {
+    throw std::runtime_error("Buffer is not initialized");
+  }
+
   Type output{};
   if (bytes_read + sizeof(output) > buffer_size) {
-    std::cout << bytes_read << " + " << sizeof(output) << " >= " << buffer_size
-              << std::endl;
-
     throw std::runtime_error("Not enough bytes");
   }
 
@@ -37,10 +38,9 @@ struct BufferReader::PrivateData final {
   std::size_t bytes_read{0U};
 };
 
-StringErrorOr<BufferReader::Ref>
-BufferReader::create(const std::uint8_t *buffer, std::size_t buffer_size) {
+StringErrorOr<BufferReader::Ref> BufferReader::create() {
   try {
-    return Ref(new BufferReader(buffer, buffer_size));
+    return Ref(new BufferReader());
 
   } catch (const std::bad_alloc &) {
     return StringError::create("Memory allocation failure");
@@ -51,6 +51,13 @@ BufferReader::create(const std::uint8_t *buffer, std::size_t buffer_size) {
 }
 
 BufferReader::~BufferReader() {}
+
+void BufferReader::reset(const std::vector<std::uint8_t> &buffer) {
+  d->buffer = buffer.data();
+  d->buffer_size = buffer.size();
+
+  d->bytes_read = 0U;
+}
 
 std::size_t BufferReader::offset() const { return d->bytes_read; }
 
@@ -102,9 +109,5 @@ std::size_t BufferReader::availableBytes() const {
   return d->buffer_size - d->bytes_read;
 }
 
-BufferReader::BufferReader(const std::uint8_t *buffer, std::size_t buffer_size)
-    : d(new PrivateData) {
-  d->buffer = buffer;
-  d->buffer_size = buffer_size;
-}
+BufferReader::BufferReader() : d(new PrivateData) {}
 } // namespace tob::ebpfpub
