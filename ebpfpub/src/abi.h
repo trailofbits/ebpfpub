@@ -24,4 +24,7 @@ getPtRegsParameterFromName(llvm::IRBuilder<> &builder, llvm::Value *pt_regs,
 StringErrorOr<llvm::Value *>
 getRegisterForParameterIndex(llvm::IRBuilder<> &builder, llvm::Value *pt_regs,
                              std::uint32_t index, llvm::Type *type = nullptr);
+
+StringErrorOr<std::uint32_t>
+translateParameterNumberToPtregsIndex(std::uint32_t index);
 } // namespace tob::ebpfpub

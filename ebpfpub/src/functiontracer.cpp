@@ -8,10 +8,12 @@
 
 #include "functiontracer.h"
 #include "abi.h"
-#include "syscallserializerfactory.h"
 
-#include <atomic>
+#include <iostream>
+#include <limits>
+#include <unordered_set>
 
+#include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/Verifier.h>
 
 #include <tob/ebpf/ebpf_utils.h>
@@ -21,27 +23,15 @@
 
 namespace tob::ebpfpub {
 namespace {
-using EventMap = ebpf::BPFMap<BPF_MAP_TYPE_HASH, std::uint64_t>;
-using StackMap = ebpf::BPFMap<BPF_MAP_TYPE_PERCPU_ARRAY, std::uint32_t>;
-
+const std::string kSpecialExitCodeParameterName{"EXIT_CODE"};
 const std::string kLLVMModuleName{"FunctionTracer"};
-
-const std::string kSyscallsEventCategory{"syscalls"};
-const std::string kEnterEventNamePrefix{"sys_enter_"};
-const std::string kExitEventNamePrefix{"sys_exit_"};
-
-void initializeSerializerFactoryHelper() {
-  static const auto serializers_initialized_exp = initializeSerializerFactory();
-
-  if (serializers_initialized_exp.failed()) {
-    throw serializers_initialized_exp.error();
-  }
-}
-
-std::uint32_t generateKprobeIdentifier() {
-  static std::atomic_uint32_t identifier_generator{0U};
-  return ++identifier_generator;
-}
+const std::string kEventTypeName{"Event"};
+const std::string kEventHeaderTypeName{"EventHeader"};
+const std::string kEventDataTypeName{"EventData"};
+const std::string kEnterFunctionParameterTypeName{"EnterFunctionParameters"};
+const std::string kExitFunctionParameterTypeName{"ExitFunctionParameters"};
+const std::string kEnterFunctionName{"onFunctionEnter"};
+const std::string kExitFunctionName{"onFunctionExit"};
 } // namespace
 
 struct FunctionTracer::PrivateData final {
@@ -49,17 +39,21 @@ struct FunctionTracer::PrivateData final {
               ebpf::PerfEventArray &perf_event_array_)
       : buffer_storage(buffer_storage_), perf_event_array(perf_event_array_) {}
 
-  EventData event_data;
-  IFunctionSerializer::Ref serializer;
+  std::string name;
 
-  std::size_t event_map_size;
+  ParameterList parameter_list;
+  ParameterListIndex parameter_list_index;
+
+  std::string module_ir;
+
   IBufferStorage &buffer_storage;
   ebpf::PerfEventArray &perf_event_array;
 
-  llvm::LLVMContext llvm_context;
-  std::unique_ptr<llvm::Module> llvm_module;
+  ebpf::IPerfEvent::Ref enter_event;
+  ebpf::IPerfEvent::Ref exit_event;
 
-  BPFProgramWriter::ProgramResources program_resources;
+  EventMap::Ref event_map;
+  EventScratchSpace::Ref event_scratch_space;
 
   utils::UniqueFd enter_program;
   utils::UniqueFd exit_program;
@@ -67,169 +61,189 @@ struct FunctionTracer::PrivateData final {
 
 FunctionTracer::~FunctionTracer() {}
 
-const std::string &FunctionTracer::name() const { return d->event_data.name; }
+const std::string &FunctionTracer::name() const { return d->name; }
 
-std::uint32_t FunctionTracer::eventIdentifier() const {
-  return d->event_data.enter_event->identifier();
+std::uint64_t FunctionTracer::eventIdentifier() const {
+  return static_cast<std::uint64_t>(d->enter_event->fd());
 }
 
-std::string FunctionTracer::ir() const {
-  std::string output_buffer;
-  llvm::raw_string_ostream output_stream(output_buffer);
+std::string FunctionTracer::ir() const { return d->module_ir; }
 
-  d->llvm_module->print(output_stream, nullptr);
-  return output_buffer;
-}
+StringErrorOr<FunctionTracer::EventList>
+FunctionTracer::parseEventData(BufferReader &buffer_reader) const {
 
-StringErrorOr<IFunctionSerializer::EventList>
-FunctionTracer::parseEvents(IBufferReader &buffer_reader) const {
-  IFunctionSerializer::EventList event_list;
+  auto event_object_size =
+      static_cast<std::uint32_t>(d->event_map->valueSize());
 
-  auto &buffer_storage_impl = static_cast<BufferStorage &>(d->buffer_storage);
+  auto event_data_exp = parseEventData(
+      buffer_reader, event_object_size, eventIdentifier(), name(),
+      d->parameter_list, d->parameter_list_index, d->buffer_storage);
 
-  for (;;) {
-    if (buffer_reader.availableBytes() < 8U) {
-      return StringError::create("Not enough bytes to read the event");
-    }
-
-    auto entry_size = buffer_reader.peekU32(0U);
-    auto event_identifier = buffer_reader.peekU32(4U);
-    if (event_identifier != d->event_data.enter_event->identifier()) {
-      break;
-    }
-
-    entry_size -= 8U;
-
-    if (entry_size > buffer_reader.availableBytes()) {
-      return StringError::create("Not enough bytes to read the event");
-    }
-
-    buffer_reader.skipBytes(8U);
-
-    IFunctionSerializer::Event event = {};
-    event.name = d->event_data.name;
-
-    event.header.timestamp = buffer_reader.u64();
-    event.header.parent_process_id = 0U;
-    event.header.thread_id = static_cast<pid_t>(buffer_reader.u32());
-    event.header.process_id = static_cast<pid_t>(buffer_reader.u32());
-    event.header.user_id = buffer_reader.u32();
-    event.header.group_id = buffer_reader.u32();
-    event.header.exit_code = buffer_reader.u64();
-    event.header.probe_error = (buffer_reader.u64() != 0U);
-
-    auto success_exp =
-        d->serializer->parseEvents(event, buffer_reader, buffer_storage_impl);
-
-    if (success_exp.failed()) {
-      return success_exp.error();
-    }
-
-    event_list.push_back(std::move(event));
-    if (buffer_reader.availableBytes() == 0U) {
-      break;
-    }
+  if (!event_data_exp.succeeded()) {
+    auto error = event_data_exp.error();
+    std::cout << "ERROR: " << error.message() << std::endl;
   }
 
-  if (event_list.empty()) {
-    return StringError::create("Failed to read any event");
-  }
-
-  return event_list;
+  return event_data_exp;
 }
 
-FunctionTracer::FunctionTracer(EventData event_data,
-                               IFunctionSerializer::Ref serializer,
+FunctionTracer::FunctionTracer(const std::string &name,
+                               const ParameterList &parameter_list,
                                std::size_t event_map_size,
                                IBufferStorage &buffer_storage,
-                               ebpf::PerfEventArray &perf_event_array)
+                               ebpf::PerfEventArray &perf_event_array,
+                               ebpf::IPerfEvent::Ref enter_event,
+                               ebpf::IPerfEvent::Ref exit_event)
     : d(new PrivateData(buffer_storage, perf_event_array)) {
 
-  d->event_data = std::move(event_data);
-  d->serializer = std::move(serializer);
+  d->name = name;
+  d->parameter_list = parameter_list;
 
-  // Initialize the LLVM module
-  d->llvm_module = ebpf::createLLVMModule(d->llvm_context, kLLVMModuleName);
-  if (!d->llvm_module) {
+  d->enter_event = std::move(enter_event);
+  d->exit_event = std::move(exit_event);
+
+  auto success_exp = validateParameterList(parameter_list, buffer_storage);
+  if (success_exp.failed()) {
+    throw success_exp.error();
+  }
+
+  // Create the parameter list index, mapping the `in` and `out` parameters of
+  // the function to the event data structure. It doesn't matter which event we
+  // use (enter/exit) as they will always be both of the same type (tracepoint,
+  // kprobe or uprobe)
+
+  bool is_tracepoint =
+      d->enter_event->type() == ebpf::IPerfEvent::Type::Tracepoint;
+
+  auto param_list_index_exp =
+      createParameterListIndex(is_tracepoint, parameter_list);
+
+  if (!param_list_index_exp.succeeded()) {
+    throw param_list_index_exp.error();
+  }
+
+  d->parameter_list_index = param_list_index_exp.takeValue();
+
+  llvm::LLVMContext llvm_context;
+  auto llvm_module_ref = ebpf::createLLVMModule(llvm_context, kLLVMModuleName);
+  if (!llvm_module_ref) {
     throw StringError::create("Failed to generate the LLVM BPF module");
   }
 
-  // Create the BPF writer helper
-  auto &buffer_storage_impl = static_cast<BufferStorage &>(d->buffer_storage);
-
-  auto bpf_program_writer_exp = BPFProgramWriter::create(
-      *d->llvm_module.get(), buffer_storage_impl, d->event_data.enter_structure,
-      d->event_data.exit_structure, d->event_data.program_type);
-
-  if (!bpf_program_writer_exp.succeeded()) {
-    throw bpf_program_writer_exp.error();
-  }
-
-  auto bpf_program_writer_ref = bpf_program_writer_exp.takeValue();
-
-  auto &bpf_program_writer_impl =
-      *static_cast<BPFProgramWriter *>(bpf_program_writer_ref.get());
-
-  // Initialize the types and the internal maps
-  auto program_resources_exp =
-      bpf_program_writer_impl.initializeProgram(event_map_size);
-
-  if (!program_resources_exp.succeeded()) {
-    throw program_resources_exp.error();
-  }
-
-  d->program_resources = program_resources_exp.takeValue();
-
-  // Generate the enter function
-  auto success_exp = initializeEnterFunction(bpf_program_writer_impl);
+  auto &llvm_module = *llvm_module_ref.get();
+  success_exp = createEventHeaderType(llvm_module);
   if (success_exp.failed()) {
     throw success_exp.error();
   }
 
-  success_exp = finalizeEnterFunction(bpf_program_writer_impl);
+  success_exp = createEventDataType(llvm_module, parameter_list);
   if (success_exp.failed()) {
     throw success_exp.error();
   }
 
-  // Generate the exit function
-  success_exp = initializeExitFunction(bpf_program_writer_impl);
+  success_exp = createEventType(llvm_module);
   if (success_exp.failed()) {
     throw success_exp.error();
   }
 
-  success_exp = finalizeExitFunction(bpf_program_writer_impl);
+  auto event_map_exp = createEventMap(llvm_module, event_map_size);
+  if (!event_map_exp.succeeded()) {
+    throw event_map_exp.error();
+  }
+
+  d->event_map = event_map_exp.takeValue();
+
+  auto event_scratch_space_exp = createEventScratchSpace(llvm_module);
+  if (!event_scratch_space_exp.succeeded()) {
+    throw event_scratch_space_exp.error();
+  }
+
+  d->event_scratch_space = event_scratch_space_exp.takeValue();
+
+  // Create the enter function parameters
+  success_exp = createEnterFunctionArgumentType(
+      llvm_module, *d->enter_event.get(), parameter_list);
+
   if (success_exp.failed()) {
     throw success_exp.error();
+  }
+
+  // Create the exit function parameters
+  success_exp =
+      createExitFunctionArgumentType(llvm_module, *d->exit_event.get());
+
+  if (success_exp.failed()) {
+    throw success_exp.error();
+  }
+
+  // Assemble the enter function
+  auto &event_map_ref = *d->event_map.get();
+  auto &event_scratch_space_ref = *d->event_scratch_space.get();
+
+  success_exp =
+      createEnterFunction(llvm_module, event_map_ref, event_scratch_space_ref,
+                          *d->enter_event.get(), parameter_list,
+                          d->parameter_list_index, d->buffer_storage);
+
+  if (success_exp.failed()) {
+    throw success_exp.error();
+  }
+
+  // Assemble the exit function
+  success_exp = createExitFunction(
+      llvm_module, event_map_ref, *d->exit_event.get(), parameter_list,
+      d->parameter_list_index, d->buffer_storage, d->perf_event_array);
+
+  if (success_exp.failed()) {
+    throw success_exp.error();
+  }
+
+  // Save the module IR
+  llvm::raw_string_ostream output_stream(d->module_ir);
+  llvm_module.print(output_stream, nullptr);
+
+  // Verify the module
+  std::string error_buffer;
+  llvm::raw_string_ostream error_stream(error_buffer);
+
+  if (llvm::verifyModule(llvm_module, &error_stream) != 0) {
+    error_stream.flush();
+
+    std::string error_message = "Module verification failed";
+    if (!error_buffer.empty()) {
+      error_message += ": " + error_buffer;
+    }
+
+    throw StringError::create(error_message);
   }
 
   // Compile the module; we'll obtain one program for the enter event, and
   // another one for the exit event
-  auto &module = *d->llvm_module.get();
-
-  auto program_map_exp = ebpf::compileModule(module);
+  auto program_map_exp = ebpf::compileModule(llvm_module);
   if (!program_map_exp.succeeded()) {
     throw program_map_exp.error();
   }
 
   auto program_map = program_map_exp.takeValue();
 
-  auto enter_program_it = program_map.find("on_syscall_enter_section");
+  // Get the enter program
+  auto enter_program_it = program_map.find("onFunctionEnter_section");
   if (enter_program_it == program_map.end()) {
-    throw StringError::create("Failed to compile the enter program");
+    throw StringError::create("The enter program was not compiled");
   }
 
-  auto &enter_program = enter_program_it->second;
+  auto enter_program = enter_program_it->second;
 
-  auto exit_program_it = program_map.find("on_syscall_exit_section");
+  // Get the exit program
+  auto exit_program_it = program_map.find("onFunctionExit_section");
   if (exit_program_it == program_map.end()) {
-    throw StringError::create("Failed to compile the exit program");
+    throw StringError::create("The exit program was not compiled");
   }
 
-  auto &exit_program = exit_program_it->second;
+  auto exit_program = exit_program_it->second;
 
   // Load the enter program
-  auto program_exp =
-      ebpf::loadProgram(enter_program, *d->event_data.enter_event.get());
+  auto program_exp = ebpf::loadProgram(enter_program, *d->enter_event.get());
 
   if (!program_exp.succeeded()) {
     auto load_error = "The 'enter' program could not be loaded: " +
@@ -241,8 +255,7 @@ FunctionTracer::FunctionTracer(EventData event_data,
   d->enter_program = program_exp.takeValue();
 
   // Load the exit program
-  program_exp =
-      ebpf::loadProgram(exit_program, *d->event_data.exit_event.get());
+  program_exp = ebpf::loadProgram(exit_program, *d->exit_event.get());
 
   if (!program_exp.succeeded()) {
     auto load_error = "The 'exit' program could not be loaded: " +
@@ -254,842 +267,1935 @@ FunctionTracer::FunctionTracer(EventData event_data,
   d->exit_program = program_exp.takeValue();
 }
 
-SuccessOrStringError FunctionTracer::initializeProgramWriter(
-    BPFProgramWriter &bpf_prog_writer, llvm::Value *buffer_storage_entry_key,
-    llvm::Value *event_entry, llvm::Value *buffer_storage_index,
-    llvm::Value *buffer_storage_stack, llvm::Value *scratch_space_32,
-    llvm::Value *scratch_space_64) {
+StringErrorOr<llvm::Value *>
+FunctionTracer::getStackAllocation(const StackAllocationList &allocation_list,
+                                   const std::string &name) {
 
-  bpf_prog_writer.clearSavedValues();
+  auto allocation_it = allocation_list.find(name);
+  if (allocation_it == allocation_list.end()) {
+    return StringError::create("The stack variable named '" + name +
+                               "' was not found");
+  }
 
-  bpf_prog_writer.setValue("buffer_storage_entry_key",
-                           buffer_storage_entry_key);
+  const auto &allocation = allocation_it->second;
+  return allocation;
+}
 
-  bpf_prog_writer.setValue("event_entry", event_entry);
-  bpf_prog_writer.setValue("buffer_storage_index", buffer_storage_index);
-  bpf_prog_writer.setValue("buffer_storage_stack", buffer_storage_stack);
+SuccessOrStringError FunctionTracer::allocateStackSpace(
+    StackAllocationList &allocation_list, const std::string &name,
+    llvm::IRBuilder<> &builder, llvm::Type *allocation_type) {
 
-  bpf_prog_writer.setValue("scratch_space_32", scratch_space_32);
-  bpf_prog_writer.setValue("scratch_space_64", scratch_space_64);
+  auto allocation_it = allocation_list.find(name);
+  if (allocation_it != allocation_list.end()) {
+    return StringError::create(
+        "An allocation with the same name already exists");
+  }
+
+  auto value = builder.CreateAlloca(allocation_type);
+  allocation_list.insert({name, value});
+
+  return {};
+}
+
+StringErrorOr<FunctionTracer::ParameterListIndex>
+FunctionTracer::createParameterListIndex(
+    bool is_tracepoint, const FunctionTracer::ParameterList &valid_param_list) {
+
+  // If this is a tracepoint, we will have to skip its header (i.e.:
+  // common_type, common_flags, etc...) when accessing its data through the
+  // `args` structure
+  std::size_t base_source_index{0U};
+  if (is_tracepoint) {
+    base_source_index = 5U;
+  }
+
+  // Keep track of the current destination index, since we may have expanded
+  // InOut parameters
+  ParameterListIndex index;
+
+  std::size_t current_destination_index{0U};
+  for (auto param_it = valid_param_list.begin();
+       param_it != valid_param_list.end(); ++param_it) {
+
+    ParameterListIndexEntry entry = {};
+    entry.param_index =
+        static_cast<std::size_t>(param_it - valid_param_list.begin());
+
+    entry.source_index =
+        base_source_index + static_cast<std::uint32_t>(entry.param_index);
+
+    const auto &param = *param_it;
+    if (param.mode == Parameter::Mode::In ||
+        param.mode == Parameter::Mode::InOut) {
+
+      entry.destination_index_in_opt = current_destination_index;
+      ++current_destination_index;
+    }
+
+    if (param.mode == Parameter::Mode::Out ||
+        param.mode == Parameter::Mode::InOut) {
+
+      entry.destination_index_out_opt = current_destination_index;
+      ++current_destination_index;
+    }
+
+    index.push_back(entry);
+  }
+
+  // clang-format off
+  std::sort(
+    index.begin(),
+    index.end(),
+
+    [valid_param_list](const ParameterListIndexEntry &lhs,
+                       const ParameterListIndexEntry &rhs) -> bool {
+
+      auto L_compareParameterModes = [](Parameter::Mode lhs,
+                                       Parameter::Mode rhs) -> bool {
+
+        // Do not depend on the order of declaration of the enum values
+        auto L_parameterModeValue = [](Parameter::Mode mode) -> std::size_t {
+          switch (mode) {
+          case Parameter::Mode::In:
+            return 0;
+
+          case Parameter::Mode::InOut:
+            return 1;
+
+          case Parameter::Mode::Out:
+            return 2;
+          }
+        };
+        
+        return L_parameterModeValue(lhs) < L_parameterModeValue(rhs);
+      };
+
+      auto L_compareParameterTypes = [](Parameter::Type lhs,
+                                        Parameter::Type rhs) -> bool {
+
+        // Do not depend on the order of declaration of the enum values
+        auto L_parameterTypeValue = [](Parameter::Type type) -> std::size_t {
+          switch (type) {
+          case Parameter::Type::Integer:
+            return 0;
+
+          case Parameter::Type::IntegerPtr:
+            return 1;
+
+          case Parameter::Type::String:
+            return 2;
+
+          case Parameter::Type::Buffer:
+            return 3;
+
+          case Parameter::Type::Argv:
+            return 4;
+          }
+        };
+
+        return L_parameterTypeValue(lhs) < L_parameterTypeValue(rhs);
+      };
+
+      auto L_compareOptSizeVariant = [](const Parameter::SizeVariant &lhs,
+                                        const Parameter::SizeVariant &rhs) -> bool {
+
+        return std::holds_alternative<std::size_t>(lhs);
+      };
+
+      const auto &lhs_parameter = valid_param_list.at(lhs.param_index);
+      const auto &rhs_parameter = valid_param_list.at(rhs.param_index);
+
+      if (lhs_parameter.type != rhs_parameter.type) {
+        return L_compareParameterTypes(lhs_parameter.type, rhs_parameter.type);
+      }
+
+      if (lhs_parameter.mode != rhs_parameter.mode) {
+        return L_compareParameterModes(lhs_parameter.mode, rhs_parameter.mode);
+      }
+
+      if (lhs_parameter.opt_size_var.has_value() != rhs_parameter.opt_size_var.has_value()) {
+        if (lhs_parameter.opt_size_var.has_value()) {
+          return false;
+
+        } else {
+          return true;
+        }
+      }
+
+      // At this point, the two ::has_value() are equal
+      if (lhs_parameter.opt_size_var.has_value()) {
+        const auto &lhs_size_var = lhs_parameter.opt_size_var.value();
+        const auto &rhs_size_var = rhs_parameter.opt_size_var.value();
+
+        if (lhs_size_var.index() != rhs_size_var.index()) {
+          return L_compareOptSizeVariant(lhs_size_var, rhs_size_var);
+        }
+      }
+
+      return lhs_parameter.name < rhs_parameter.name;
+    }
+  );
+  // clang-format on
+
+  return index;
+}
+
+StringErrorOr<llvm::Value *>
+FunctionTracer::getVariable(const VariableList &variable_list,
+                            const std::string &name) {
+
+  auto variable_it = variable_list.find(name);
+  if (variable_it == variable_list.end()) {
+    return StringError::create("No following variable was not found: '" + name +
+                               "'");
+  }
+
+  auto variable = variable_it->second;
+  return variable;
+}
+
+SuccessOrStringError FunctionTracer::saveVariable(VariableList &variable_list,
+                                                  const std::string &name,
+                                                  llvm::Value *value) {
+  auto variable_it = variable_list.find(name);
+  if (variable_it != variable_list.end()) {
+    return StringError::create("The following variable already exists: '" +
+                               name + "'");
+  }
+
+  variable_list.insert({name, value});
+  return {};
+}
+
+StringErrorOr<llvm::Value *>
+FunctionTracer::generateBufferStorageIndex(llvm::IRBuilder<> &builder,
+                                           const VariableList &variable_list,
+                                           IBufferStorage &buffer_storage) {
+
+  auto buffer_storage_index_generator_exp =
+      getVariable(variable_list, "buffer_storage_index_generator");
+
+  if (!buffer_storage_index_generator_exp.succeeded()) {
+    return buffer_storage_index_generator_exp.error();
+  }
+
+  auto buffer_storage_index_generator =
+      buffer_storage_index_generator_exp.takeValue();
+
+  auto previous_buffer_storage_index =
+      builder.CreateLoad(buffer_storage_index_generator);
+
+  auto buffer_storage_index =
+      builder.CreateBinOp(llvm::Instruction::Add, previous_buffer_storage_index,
+                          builder.getInt32(1));
+
+  auto buffer_storage_count =
+      static_cast<std::uint32_t>(buffer_storage.bufferCount());
+
+  buffer_storage_index =
+      builder.CreateBinOp(llvm::Instruction::URem, buffer_storage_index,
+                          builder.getInt32(buffer_storage_count));
+
+  builder.CreateStore(buffer_storage_index, buffer_storage_index_generator);
+
+  return buffer_storage_index;
+}
+
+llvm::Value *FunctionTracer::tagBufferStorageIndex(
+    ebpf::BPFSyscallInterface &bpf_syscall_interface,
+    llvm::IRBuilder<> &builder, llvm::Value *buffer_storage_index) {
+
+  auto current_processor_id = bpf_syscall_interface.getSmpProcessorId();
+
+  current_processor_id =
+      builder.CreateZExt(current_processor_id, builder.getInt64Ty());
+
+  current_processor_id = builder.CreateBinOp(
+      llvm::Instruction::Shl, current_processor_id, builder.getInt64(48U));
+
+  current_processor_id =
+      builder.CreateBinOp(llvm::Instruction::Or, current_processor_id,
+                          builder.getInt64(0xFF00000000000000ULL));
+
+  auto tagged_buffer_storage_index =
+      builder.CreateZExt(buffer_storage_index, builder.getInt64Ty());
+
+  tagged_buffer_storage_index = builder.CreateBinOp(
+      llvm::Instruction::Or, tagged_buffer_storage_index, current_processor_id);
+
+  return tagged_buffer_storage_index;
+}
+
+SuccessOrStringError FunctionTracer::validateParameterList(
+    const FunctionTracer::ParameterList &parameter_list,
+    IBufferStorage &buffer_storage) {
+
+  std::unordered_set<std::string> valid_integer_list;
+  std::unordered_set<std::string> parameter_name_list;
+
+  for (const auto &param : parameter_list) {
+    // Make sure the parameter name does not contain the special separator
+    // that we use internally
+    if (param.name.find(':') != std::string::npos) {
+      return StringError::create("Invalid parameter name");
+    }
+
+    // Don't duplicate parameter names
+    if (parameter_name_list.count(param.name) > 0U) {
+      return StringError::create(
+          "Duplicated name found in the given parameter list");
+    }
+
+    parameter_name_list.insert(param.name);
+
+    // The function exit code can be re-captured explicitly using
+    // a custom type. This is done using the `exit_code` variable
+    // name, and it must be set as an OUT parameter
+    if (param.name == kSpecialExitCodeParameterName &&
+        param.mode != Parameter::Mode::Out) {
+      return StringError::create(
+          "The special ':exit_code' parameter can only be set as OUT");
+    }
+
+    // Validate the type
+    if (param.type == Parameter::Type::Integer ||
+        param.type == Parameter::Type::IntegerPtr) {
+
+      auto is_integer_ptr = (param.type == Parameter::Type::IntegerPtr);
+
+      if (!param.opt_size_var.has_value()) {
+        return StringError::create("Missing field size type for '" +
+                                   param.name + "'");
+      }
+
+      const auto &size_var = param.opt_size_var.value();
+
+      if (!std::holds_alternative<std::size_t>(size_var)) {
+        return StringError::create("Invalid field size type for '" +
+                                   param.name + "'");
+      }
+
+      const auto &integer_size = std::get<std::size_t>(size_var);
+
+      switch (integer_size) {
+      case 1U:
+      case 2U:
+      case 4U:
+      case 8U:
+        break;
+
+      default: {
+        return StringError::create("Invalid field size specified for '" +
+                                   param.name + "'");
+      }
+      }
+
+      if (is_integer_ptr) {
+        if (param.mode == Parameter::Mode::In ||
+            param.mode == Parameter::Mode::InOut) {
+          valid_integer_list.insert("in:" + param.name);
+        }
+
+        if (param.mode == Parameter::Mode::Out ||
+            param.mode == Parameter::Mode::InOut) {
+          valid_integer_list.insert("out:" + param.name);
+        }
+
+      } else {
+        if (param.mode != Parameter::Mode::In) {
+          return StringError::create("Integer fields can only be set as IN");
+        }
+
+        valid_integer_list.insert("in:" + param.name);
+      }
+
+    } else if (param.type == Parameter::Type::String) {
+      if (param.opt_size_var.has_value()) {
+        return StringError::create(
+            "String types should not have a size attribute");
+      }
+
+    } else if (param.type == Parameter::Type::Argv) {
+      if (param.mode != Parameter::Mode::In) {
+        return StringError::create("Argv fields can only be set as IN");
+      }
+
+      if (!param.opt_size_var.has_value()) {
+        return StringError::create(
+            "Missing field size for the following Argv parameter: " +
+            param.name);
+      }
+
+      if (!std::holds_alternative<std::size_t>(param.opt_size_var.value())) {
+        return StringError::create(
+            "Invalid field size for the following Argv parameter: " +
+            param.name);
+      }
+
+      auto argv_size = std::get<std::size_t>(param.opt_size_var.value());
+      if (argv_size == 0) {
+        return StringError::create(
+            "The field size for the Argv parameter named '" + param.name +
+            "' is set to 0");
+      }
+
+      // Assuming that we need 64-bit pointers for each string, make sure we
+      // have enough space into a single buffer storage entry to save the
+      // requested amount of entries.
+      //
+      // Use argv_size + null entry
+      auto index_space = (argv_size + 1U) * sizeof(std::uint64_t);
+      if (index_space >= buffer_storage.bufferSize()) {
+        return StringError::create("The buffer storage entry size is too small "
+                                   "to store the Argv indexes of parameter " +
+                                   param.name);
+      }
+
+      // Also make sure that the argv_size value makes sense according to the
+      // number of buffer entries we have. This is hard to validate in a
+      // meaningful way, but as a general rule let's throw an error if the
+      // current settings wouldn't allow us to store at least two events
+      // without losing data
+      if (argv_size * 2U >= buffer_storage.bufferCount()) {
+        return StringError::create(
+            "The buffer storage entry count is too small to store the amount "
+            "of Argv entries specified for parameter " +
+            param.name);
+      }
+
+    } else if (param.type == Parameter::Type::Buffer) {
+      continue;
+
+    } else {
+      return StringError::create("Unsupported parameter type specified for '" +
+                                 param.name + "'");
+    }
+  }
+
+  for (const auto &param : parameter_list) {
+    if (param.type != Parameter::Type::Buffer) {
+      continue;
+    }
+
+    if (!param.opt_size_var.has_value()) {
+      return StringError::create("Missing field size type for '" + param.name +
+                                 "'");
+    }
+
+    const auto &size_var = param.opt_size_var.value();
+
+    if (std::holds_alternative<std::size_t>(size_var)) {
+      const auto &integer_size = std::get<std::size_t>(size_var);
+      if (integer_size == 0) {
+        return StringError::create("Invalid field size specified for '" +
+                                   param.name + "'");
+      }
+
+    } else if (std::holds_alternative<std::string>(size_var)) {
+      std::vector<std::string> prefix_list;
+
+      if (param.mode == Parameter::Mode::In ||
+          param.mode == Parameter::Mode::InOut) {
+
+        prefix_list.push_back("in:");
+      }
+
+      if (param.mode == Parameter::Mode::Out ||
+          param.mode == Parameter::Mode::InOut) {
+
+        prefix_list.push_back("out:");
+      }
+
+      auto size_param_name = std::get<std::string>(size_var);
+
+      for (const auto &prefix : prefix_list) {
+        auto full_size_param_name = prefix + size_param_name;
+
+        if (valid_integer_list.count(full_size_param_name) == 0) {
+          return StringError::create("Invalid field size specified for '" +
+                                     param.name + "'");
+        }
+      }
+
+    } else {
+      return StringError::create("Unexpected field size type specified for '" +
+                                 param.name + "'");
+    }
+  }
+
+  return {};
+}
+
+llvm::Type *FunctionTracer::llvmTypeForMemoryPointer(llvm::Module &module) {
+  auto &context = module.getContext();
+
+  llvm::Type *llvm_type{nullptr};
+  if (sizeof(void *) == 4U) {
+    llvm_type = llvm::Type::getInt32Ty(context);
+  } else {
+    llvm_type = llvm::Type::getInt64Ty(context);
+  }
+
+  return llvm_type;
+}
+
+SuccessOrStringError
+FunctionTracer::createEventHeaderType(llvm::Module &module) {
+  auto &context = module.getContext();
+
+  // clang-format off
+  std::vector<llvm::Type *> type_list = {
+    // Event object size
+    llvm::Type::getInt32Ty(context),
+
+    // Event identifier
+    llvm::Type::getInt64Ty(context),
+
+    // Timestamp
+    llvm::Type::getInt64Ty(context),
+
+    // PID, TGID
+    llvm::Type::getInt64Ty(context),
+
+    // UID, GID
+    llvm::Type::getInt64Ty(context),
+
+    // cgroup id
+    llvm::Type::getInt64Ty(context),
+
+    // Exit code
+    llvm::Type::getInt64Ty(context),
+
+    // Probe error flag
+    llvm::Type::getInt64Ty(context)
+  };
+  // clang-format on
+
+  auto existing_type_ptr = module.getTypeByName(kEventHeaderTypeName);
+  if (existing_type_ptr != nullptr) {
+    return StringError::create("A type named " + kEventHeaderTypeName +
+                               " is already defined");
+  }
+
+  auto event_header =
+      llvm::StructType::create(type_list, kEventHeaderTypeName, true);
+
+  if (event_header == nullptr) {
+    return StringError::create("Failed to create the event header type");
+  }
 
   return {};
 }
 
 SuccessOrStringError
-FunctionTracer::initializeEnterFunction(BPFProgramWriter &bpf_prog_writer) {
+FunctionTracer::createEventDataType(llvm::Module &module,
+                                    const ParameterList &valid_param_list) {
 
-  auto &builder = bpf_prog_writer.builder();
-  auto &context = bpf_prog_writer.context();
+  auto &context = module.getContext();
+
+  std::vector<llvm::Type *> type_list;
+
+  for (const auto &param : valid_param_list) {
+    llvm::Type *field_type{nullptr};
+
+    switch (param.type) {
+    case Parameter::Type::Integer:
+    case Parameter::Type::IntegerPtr:
+    case Parameter::Type::Buffer:
+    case Parameter::Type::String:
+    case Parameter::Type::Argv:
+      field_type = llvm::Type::getInt64Ty(context);
+      break;
+    }
+
+    if (field_type == nullptr) {
+      return StringError::create("Invalid parameter type");
+    }
+
+    type_list.push_back(field_type);
+    if (param.mode == Parameter::Mode::InOut) {
+      type_list.push_back(field_type);
+    }
+  }
+
+  auto existing_type_ptr = module.getTypeByName(kEventDataTypeName);
+  if (existing_type_ptr != nullptr) {
+    return StringError::create("A type named " + kEventDataTypeName +
+                               " is already defined");
+  }
+
+  auto event_data_type =
+      llvm::StructType::create(type_list, kEventDataTypeName, true);
+
+  if (event_data_type == nullptr) {
+    return StringError::create("Failed to create the event data type");
+  }
+
+  return {};
+}
+
+SuccessOrStringError FunctionTracer::createEventType(llvm::Module &module) {
+  auto event_header_type = module.getTypeByName(kEventHeaderTypeName);
+  if (event_header_type == nullptr) {
+    return StringError::create("The event header type is not defined");
+  }
+
+  auto event_data_type = module.getTypeByName(kEventDataTypeName);
+  if (event_data_type == nullptr) {
+    return StringError::create("The event data type is not defined");
+  }
+
+  std::vector<llvm::Type *> type_list = {event_header_type, event_data_type};
+
+  auto event_type = llvm::StructType::create(type_list, kEventTypeName, true);
+
+  if (event_type == nullptr) {
+    return StringError::create("Failed to create the event type");
+  }
+
+  return {};
+}
+
+StringErrorOr<FunctionTracer::EventMap::Ref>
+FunctionTracer::createEventMap(llvm::Module &module,
+                               std::size_t event_map_size) {
+
+  auto event_type = module.getTypeByName(kEventTypeName);
+  if (event_type == nullptr) {
+    return StringError::create("The event type is not defined");
+  }
+
+  auto event_type_size = ebpf::getLLVMStructureSize(event_type, &module);
+  return EventMap::create(event_type_size, event_map_size);
+}
+
+StringErrorOr<FunctionTracer::EventScratchSpace::Ref>
+FunctionTracer::createEventScratchSpace(llvm::Module &module) {
+
+  auto event_type = module.getTypeByName(kEventTypeName);
+  if (event_type == nullptr) {
+    return StringError::create("The event type is not defined");
+  }
+
+  auto event_type_size = ebpf::getLLVMStructureSize(event_type, &module);
+  return EventScratchSpace::create(event_type_size, 1U);
+}
+
+SuccessOrStringError FunctionTracer::createEnterFunctionArgumentType(
+    llvm::Module &module, ebpf::IPerfEvent &enter_event,
+    const ParameterList &parameter_list) {
+
+  auto &context = module.getContext();
+
+  StringErrorOr<llvm::StructType *> function_param_type_exp;
+
+  if (enter_event.type() == ebpf::IPerfEvent::Type::Tracepoint) {
+    // TODO(alessandro): We could future-proof this by importing
+    // the header from a real tracepoint
+
+    // Tracepoints always start with a common header
+    std::vector<llvm::Type *> type_list;
+
+    // field:unsigned short common_type; offset:0; size:2;
+    // signed:0;
+    type_list.push_back(llvm::Type::getInt16Ty(context));
+
+    // field:unsigned char common_flags; offset:2; size:1;
+    // signed:0;
+    type_list.push_back(llvm::Type::getInt8Ty(context));
+
+    // field:unsigned char common_preempt_count; offset:3;
+    // size:1; signed:0;
+    type_list.push_back(llvm::Type::getInt8Ty(context));
+
+    // field:int common_pid; offset:4; size:4; signed:1;
+    type_list.push_back(llvm::Type::getInt32Ty(context));
+
+    // field:int __syscall_nr; offset:8; size:4; signed:1;
+    type_list.push_back(llvm::Type::getInt32Ty(context));
+
+    // The rest of the parameters follow
+    for (const auto &param : parameter_list) {
+      llvm::Type *field_type{nullptr};
+
+      // Skip the special ":exit_code" parameter, if defined
+      if (param.name == kSpecialExitCodeParameterName) {
+        continue;
+      }
+
+      switch (param.type) {
+      case Parameter::Type::Integer: {
+        const auto size = std::get<std::size_t>(param.opt_size_var.value());
+
+        switch (size) {
+        case 1U:
+          field_type = llvm::Type::getInt8Ty(context);
+          break;
+
+        case 2U:
+          field_type = llvm::Type::getInt16Ty(context);
+          break;
+
+        case 4U:
+          field_type = llvm::Type::getInt32Ty(context);
+          break;
+
+        case 8U:
+          field_type = llvm::Type::getInt64Ty(context);
+          break;
+        }
+
+        break;
+      }
+
+      case Parameter::Type::IntegerPtr:
+      case Parameter::Type::Buffer:
+      case Parameter::Type::String:
+      case Parameter::Type::Argv:
+        field_type = llvmTypeForMemoryPointer(module);
+        break;
+      }
+
+      type_list.push_back(field_type);
+    }
+
+    auto type_ptr = llvm::StructType::create(
+        type_list, kEnterFunctionParameterTypeName, false);
+
+    if (type_ptr == nullptr) {
+      function_param_type_exp =
+          StringError::create("Failed to create the enter function parameter");
+
+    } else {
+      function_param_type_exp = type_ptr;
+    }
+
+  } else {
+    // u(ret)probes and k(ret)probes only use the pt_regs structure
+    function_param_type_exp =
+        ebpf::getPtRegsStructure(module, kEnterFunctionParameterTypeName);
+  }
+
+  if (!function_param_type_exp.succeeded()) {
+    return function_param_type_exp.error();
+  }
+
+  return {};
+}
+
+SuccessOrStringError
+FunctionTracer::createExitFunctionArgumentType(llvm::Module &module,
+                                               ebpf::IPerfEvent &exit_event) {
+
+  auto &context = module.getContext();
+
+  StringErrorOr<llvm::StructType *> function_param_type_exp;
+
+  if (exit_event.type() == ebpf::IPerfEvent::Type::Tracepoint) {
+    // TODO(alessandro): We could future-proof this by importing
+    // the header from a real tracepoint
+    std::vector<llvm::Type *> type_list;
+
+    // field:unsigned short common_type; offset:0; size:2;
+    // signed:0;
+    type_list.push_back(llvm::Type::getInt16Ty(context));
+
+    // field:unsigned char common_flags; offset:2; size:1;
+    // signed:0;
+    type_list.push_back(llvm::Type::getInt8Ty(context));
+
+    // field:unsigned char common_preempt_count; offset:3;
+    // size:1;signed:0;
+    type_list.push_back(llvm::Type::getInt8Ty(context));
+
+    // field:int common_pid; offset:4; size:4; signed:1;
+    type_list.push_back(llvm::Type::getInt32Ty(context));
+
+    // field:int __syscall_nr; offset:8; size:4; signed:1;
+    type_list.push_back(llvm::Type::getInt32Ty(context));
+
+    // field:long ret; offset:16; size:8; signed:1;
+    type_list.push_back(llvmTypeForMemoryPointer(module));
+
+    auto type_ptr = llvm::StructType::create(
+        type_list, kExitFunctionParameterTypeName, false);
+
+    if (type_ptr == nullptr) {
+      function_param_type_exp =
+          StringError::create("Failed to create the enter function parameter");
+
+    } else {
+      function_param_type_exp = type_ptr;
+    }
+
+  } else {
+    // u(ret)probes and k(ret)probes only use the pt_regs structure
+    function_param_type_exp =
+        ebpf::getPtRegsStructure(module, kExitFunctionParameterTypeName);
+  }
+
+  if (!function_param_type_exp.succeeded()) {
+    return function_param_type_exp.error();
+  }
+
+  return {};
+}
+
+StringErrorOr<llvm::Value *> FunctionTracer::getMapEntry(
+    int fd, llvm::IRBuilder<> &builder,
+    ebpf::BPFSyscallInterface &bpf_syscall_interface,
+    const StackAllocationList &allocation_list, llvm::Value *map_index_value,
+    llvm::Type *map_entry_type, const std::string &label) {
+
+  auto current_bb = builder.GetInsertBlock();
+  auto &context = current_bb->getContext();
+  auto current_function = current_bb->getParent();
+
+  // Create a new basic block
+  current_bb = llvm::BasicBlock::Create(
+      context, "acquire_" + label + "map_entry", current_function);
+
+  builder.CreateBr(current_bb);
+  builder.SetInsertPoint(current_bb);
+
+  // Acquire a suitable map index and initialize it
+  auto large_index = (map_index_value->getType() == builder.getInt64Ty());
+  auto index_name =
+      (large_index ? "generic_map_index_64" : "generic_map_index_32");
+
+  auto map_index_exp = getStackAllocation(allocation_list, index_name);
+  if (!map_index_exp.succeeded()) {
+    return map_index_exp.error();
+  }
+
+  auto map_index = map_index_exp.takeValue();
+  builder.CreateStore(map_index_value, map_index);
+
+  // Acquire the map entry
+  auto map_entry =
+      bpf_syscall_interface.mapLookupElem(fd, map_index, map_entry_type);
+
+  // Terminate the function if the entry was not found
+  auto map_entry_cond = builder.CreateICmpEQ(
+      llvm::Constant::getNullValue(map_entry->getType()), map_entry);
+
+  auto invalid_map_entry_bb = llvm::BasicBlock::Create(
+      context, "invalid_" + label + "map_entry", current_function);
+
+  auto valid_map_entry_bb = llvm::BasicBlock::Create(
+      context, "valid_" + label + "map_entry", current_function);
+
+  builder.CreateCondBr(map_entry_cond, invalid_map_entry_bb,
+                       valid_map_entry_bb);
+
+  builder.SetInsertPoint(invalid_map_entry_bb);
+  builder.CreateRet(builder.getInt64(0));
+
+  builder.SetInsertPoint(valid_map_entry_bb);
+
+  return map_entry;
+}
+
+SuccessOrStringError
+FunctionTracer::createEnterFunction(llvm::Module &module, EventMap &event_map,
+                                    EventScratchSpace &event_scratch_space,
+                                    ebpf::IPerfEvent &enter_event,
+                                    const ParameterList &parameter_list,
+                                    const ParameterListIndex &param_list_index,
+                                    IBufferStorage &buffer_storage) {
 
   // Create the function
-  auto event_function_exp = bpf_prog_writer.getEnterFunction();
-  if (!event_function_exp.succeeded()) {
-    return event_function_exp.error();
+  auto function_param_type =
+      module.getTypeByName(kEnterFunctionParameterTypeName);
+
+  if (function_param_type == nullptr) {
+    return StringError::create("The " + kEnterFunctionParameterTypeName +
+                               " type is not defined");
   }
 
-  auto enter_event_function = event_function_exp.takeValue();
+  auto function_type =
+      llvm::FunctionType::get(llvmTypeForMemoryPointer(module),
+                              {function_param_type->getPointerTo()}, false);
+
+  auto function_ptr =
+      llvm::Function::Create(function_type, llvm::Function::ExternalLinkage,
+                             kEnterFunctionName, module);
+
+  if (function_ptr == nullptr) {
+    return StringError::create("Failed to create the exit function");
+  }
+
+  function_ptr->setSection(kEnterFunctionName + "_section");
+  function_ptr->arg_begin()->setName("args");
 
   // Generate the entry basic block
-  auto entry_bb =
-      llvm::BasicBlock::Create(context, "entry", enter_event_function);
+  auto &context = module.getContext();
+  llvm::IRBuilder<> builder(context);
 
+  auto entry_bb = llvm::BasicBlock::Create(context, "entry", function_ptr);
   builder.SetInsertPoint(entry_bb);
 
-  // Pre-allocate all buffers
-  auto event_entry_key = builder.CreateAlloca(builder.getInt64Ty());
-  auto stack_space_key = builder.CreateAlloca(builder.getInt64Ty());
-
-  llvm::Value *buffer_storage_entry_key{nullptr};
-  llvm::Value *scratch_space_32{nullptr};
-  llvm::Value *scratch_space_64{nullptr};
-
-  if (d->serializer->stages().count(IFunctionSerializer::Stage::Enter) > 0U) {
-    buffer_storage_entry_key = builder.CreateAlloca(builder.getInt32Ty());
-
-    scratch_space_32 = builder.CreateAlloca(builder.getInt32Ty());
-    scratch_space_64 = builder.CreateAlloca(builder.getInt64Ty());
+  // Create the syscall interface helper
+  auto bpf_syscall_interface_exp = ebpf::BPFSyscallInterface::create(builder);
+  if (!bpf_syscall_interface_exp.succeeded()) {
+    return bpf_syscall_interface_exp.error();
   }
 
-  // Automatically filter out this event if it's coming from our PID
-  auto process_id = builder.getInt64(static_cast<std::uint64_t>(getpid()));
-  auto &bpf_syscall_interface = bpf_prog_writer.bpfSyscallInterface();
-  auto current_pid_tgid = bpf_syscall_interface.getCurrentPidTgid();
+  auto bpf_syscall_interface = bpf_syscall_interface_exp.takeValue();
 
-  auto current_tgid =
-      builder.CreateBinOp(llvm::Instruction::And, current_pid_tgid,
-                          builder.getInt64(0x00000000FFFFFFFFU));
+  // Allocate the required stack space
+  StackAllocationList stack_allocation_list;
 
-  auto check_pid_condition = builder.CreateICmpEQ(process_id, current_tgid);
+  auto success_exp =
+      allocateStackSpace(stack_allocation_list, "generic_map_index_32", builder,
+                         builder.getInt32Ty());
 
-  auto ignore_event_bb =
-      llvm::BasicBlock::Create(context, "ignore_event", enter_event_function);
-
-  auto get_event_stack_map_entry_bb = llvm::BasicBlock::Create(
-      context, "get_event_stack_map_entry", enter_event_function);
-
-  builder.CreateCondBr(check_pid_condition, ignore_event_bb,
-                       get_event_stack_map_entry_bb);
-
-  builder.SetInsertPoint(ignore_event_bb);
-  builder.CreateRet(builder.getInt64(0));
-
-  // Get the first entry in the event stack map and use it as temporary storage
-  builder.SetInsertPoint(get_event_stack_map_entry_bb);
-  builder.CreateStore(builder.getInt64(0), stack_space_key);
-
-  auto event_entry_type_exp = bpf_prog_writer.getEventEntryType();
-  if (!event_entry_type_exp.succeeded()) {
-    return event_entry_type_exp.error();
+  if (success_exp.failed()) {
+    return success_exp.error();
   }
 
-  auto event_entry_type = event_entry_type_exp.takeValue();
-  auto event_entry_type_ptr = event_entry_type->getPointerTo();
+  success_exp =
+      allocateStackSpace(stack_allocation_list, "generic_map_index_64", builder,
+                         builder.getInt64Ty());
 
-  auto event_stack_ptr = bpf_syscall_interface.mapLookupElem(
-      d->program_resources.event_stack_map->fd(), stack_space_key,
-      event_entry_type_ptr);
+  if (success_exp.failed()) {
+    return success_exp.error();
+  }
 
-  auto null_event_stack_ptr =
-      llvm::Constant::getNullValue(event_stack_ptr->getType());
+  // Do not trace ourselves!
+  auto process_id = bpf_syscall_interface->getCurrentPidTgid();
 
-  auto check_event_stack_ptr_condition =
-      builder.CreateICmpEQ(null_event_stack_ptr, event_stack_ptr);
+  process_id = builder.CreateBinOp(llvm::Instruction::LShr, process_id,
+                                   builder.getInt64(32U));
 
-  auto invalid_event_stack_ptr_bb = llvm::BasicBlock::Create(
-      context, "invalid_event_stack_ptr", enter_event_function);
+  auto host_pid = static_cast<std::uint64_t>(getpid());
 
-  auto generate_event_header_bb = llvm::BasicBlock::Create(
-      context, "generate_event_header", enter_event_function);
+  auto process_id_cond =
+      builder.CreateICmpEQ(process_id, builder.getInt64(host_pid));
 
-  builder.CreateCondBr(check_event_stack_ptr_condition,
-                       invalid_event_stack_ptr_bb, generate_event_header_bb);
+  auto discard_event_bb =
+      llvm::BasicBlock::Create(context, "discard_event", function_ptr);
 
-  builder.SetInsertPoint(invalid_event_stack_ptr_bb);
+  auto process_event_bb =
+      llvm::BasicBlock::Create(context, "process_event", function_ptr);
+
+  builder.CreateCondBr(process_id_cond, discard_event_bb, process_event_bb);
+
+  builder.SetInsertPoint(discard_event_bb);
   builder.CreateRet(builder.getInt64(0));
 
-  // Populate the event entry key
-  builder.SetInsertPoint(generate_event_header_bb);
-  builder.CreateStore(current_pid_tgid, event_entry_key);
+  builder.SetInsertPoint(process_event_bb);
 
-  //
+  // Acquire the event scratch space
+  auto event_type = module.getTypeByName(kEventTypeName);
+  if (event_type == nullptr) {
+    return StringError::create("The " + kEventTypeName +
+                               " type is not defined");
+  }
+
+  auto scratch_space_exp = getMapEntry(
+      event_scratch_space.fd(), builder, *bpf_syscall_interface.get(),
+      stack_allocation_list, builder.getInt32(0), event_type->getPointerTo(),
+      "event_scratch_space");
+
+  if (!scratch_space_exp.succeeded()) {
+    return scratch_space_exp.error();
+  }
+
+  auto scratch_space = scratch_space_exp.takeValue();
+
   // Generate the event header
-  //
+  success_exp = generateEventHeader(
+      builder, enter_event, *bpf_syscall_interface.get(), scratch_space);
 
+  if (success_exp.failed()) {
+    return success_exp.error();
+  }
+
+  // Acquire the buffer storage index generator
+  auto buffer_storage_index_generator_exp = getMapEntry(
+      buffer_storage.indexMap(), builder, *bpf_syscall_interface.get(),
+      stack_allocation_list, builder.getInt32(0),
+      builder.getInt32Ty()->getPointerTo(), "buffer_storage_index_generator");
+
+  if (!buffer_storage_index_generator_exp.succeeded()) {
+    return buffer_storage_index_generator_exp.error();
+  }
+
+  auto buffer_storage_index_generator =
+      buffer_storage_index_generator_exp.takeValue();
+
+  VariableList variable_list;
+  success_exp = saveVariable(variable_list, "buffer_storage_index_generator",
+                             buffer_storage_index_generator);
+
+  if (success_exp.failed()) {
+    return success_exp.error();
+  }
+
+  // Generate the event data
+  success_exp = generateEnterEventData(
+      builder, enter_event, *bpf_syscall_interface.get(), scratch_space,
+      parameter_list, param_list_index, buffer_storage, stack_allocation_list,
+      variable_list);
+
+  if (success_exp.failed()) {
+    return success_exp.error();
+  }
+
+  // Generate a key for the event map
+  auto event_key_value = bpf_syscall_interface->getCurrentPidTgid();
+
+  auto event_key_exp =
+      getStackAllocation(stack_allocation_list, "generic_map_index_64");
+
+  if (!event_key_exp.succeeded()) {
+    return event_key_exp.error();
+  }
+
+  auto event_key = event_key_exp.takeValue();
+  builder.CreateStore(event_key_value, event_key);
+
+  // Save the event object inside the event map
+  bpf_syscall_interface->mapUpdateElem(event_map.fd(), scratch_space, event_key,
+                                       BPF_ANY);
+
+  builder.CreateRet(builder.getInt64(0));
+  return {};
+}
+
+SuccessOrStringError FunctionTracer::generateEventHeader(
+    llvm::IRBuilder<> &builder, ebpf::IPerfEvent &enter_event,
+    ebpf::BPFSyscallInterface &bpf_syscall_interface,
+    llvm::Value *event_object) {
+
+  auto current_bb = builder.GetInsertBlock();
+  auto &module = *current_bb->getModule();
+
+  // Get the event header from the event object
   auto event_header = builder.CreateGEP(
-      event_stack_ptr, {builder.getInt32(0), builder.getInt32(0)});
+      event_object, {builder.getInt32(0), builder.getInt32(0)});
 
-  std::uint32_t field_index{0U};
+  // Event object size, including the size field itself
+  auto event_type = module.getTypeByName(kEventTypeName);
+  if (event_type == nullptr) {
+    return StringError::create("The type " + kEventTypeName +
+                               " is not defined");
+  }
 
-  // Event entry size
+  auto event_object_size = static_cast<std::uint32_t>(
+      ebpf::getLLVMStructureSize(event_type, &module));
+
   auto event_header_field = builder.CreateGEP(
-      event_header, {builder.getInt32(0), builder.getInt32(field_index)});
+      event_header, {builder.getInt32(0U), builder.getInt32(0U)});
 
-  auto event_entry_size = static_cast<std::uint32_t>(
-      d->program_resources.event_stack_map->valueSize());
-
-  builder.CreateStore(builder.getInt32(event_entry_size), event_header_field);
-
-  ++field_index;
+  builder.CreateStore(builder.getInt32(event_object_size), event_header_field);
 
   // Event identifier
   event_header_field = builder.CreateGEP(
-      event_header, {builder.getInt32(0), builder.getInt32(field_index)});
+      event_header, {builder.getInt32(0U), builder.getInt32(1U)});
 
-  auto event_identifier =
-      builder.getInt32(d->event_data.enter_event->identifier());
-
-  builder.CreateStore(event_identifier, event_header_field);
-
-  ++field_index;
+  auto event_identifier = static_cast<std::uint64_t>(enter_event.fd());
+  builder.CreateStore(builder.getInt64(event_identifier), event_header_field);
 
   // Timestamp
   event_header_field = builder.CreateGEP(
-      event_header, {builder.getInt32(0), builder.getInt32(field_index)});
+      event_header, {builder.getInt32(0U), builder.getInt32(2U)});
 
-  auto event_header_field_value = bpf_syscall_interface.ktimeGetNs();
+  auto timestamp = bpf_syscall_interface.ktimeGetNs();
+  builder.CreateStore(timestamp, event_header_field);
 
-  builder.CreateStore(event_header_field_value, event_header_field);
-
-  ++field_index;
-
-  // pid + tgid
+  // pid, tgid
   event_header_field = builder.CreateGEP(
-      event_header, {builder.getInt32(0), builder.getInt32(field_index)});
+      event_header, {builder.getInt32(0U), builder.getInt32(3U)});
 
-  builder.CreateStore(current_pid_tgid, event_header_field);
+  auto pid_tgid = bpf_syscall_interface.getCurrentPidTgid();
+  builder.CreateStore(pid_tgid, event_header_field);
 
-  ++field_index;
-
-  // uid + gid
+  // uid, gid
   event_header_field = builder.CreateGEP(
-      event_header, {builder.getInt32(0), builder.getInt32(field_index)});
+      event_header, {builder.getInt32(0U), builder.getInt32(4U)});
 
-  event_header_field_value = bpf_syscall_interface.getCurrentUidGid();
+  auto uid_gid = bpf_syscall_interface.getCurrentUidGid();
+  builder.CreateStore(uid_gid, event_header_field);
 
-  builder.CreateStore(event_header_field_value, event_header_field);
-
-  ++field_index;
-
-  // exit code
+  // cgroup id
   event_header_field = builder.CreateGEP(
-      event_header, {builder.getInt32(0), builder.getInt32(field_index)});
+      event_header, {builder.getInt32(0U), builder.getInt32(5U)});
 
-  builder.CreateStore(builder.getInt64(0), event_header_field);
+  auto cgroup_id = bpf_syscall_interface.getCurrentCgroupId();
+  builder.CreateStore(cgroup_id, event_header_field);
 
-  ++field_index;
-
-  // probe error flag
+  // Exit code (initialize to zero)
   event_header_field = builder.CreateGEP(
-      event_header, {builder.getInt32(0), builder.getInt32(field_index)});
+      event_header, {builder.getInt32(0U), builder.getInt32(6U)});
 
-  builder.CreateStore(builder.getInt64(0), event_header_field);
+  builder.CreateStore(builder.getInt64(0U), event_header_field);
 
-  //
-  // Capture all arguments, without dereferencing pointers
-  //
+  // Probe error flag (initialize to zero)
+  event_header_field = builder.CreateGEP(
+      event_header, {builder.getInt32(0U), builder.getInt32(7U)});
 
-  auto generate_event_entry_bb = llvm::BasicBlock::Create(
-      context, "generate_event_entry", enter_event_function);
+  builder.CreateStore(builder.getInt64(0U), event_header_field);
 
-  builder.CreateBr(generate_event_entry_bb);
-  builder.SetInsertPoint(generate_event_entry_bb);
+  return {};
+}
 
+SuccessOrStringError FunctionTracer::generateEnterEventData(
+    llvm::IRBuilder<> &builder, ebpf::IPerfEvent &enter_event,
+    ebpf::BPFSyscallInterface &bpf_syscall_interface, llvm::Value *event_object,
+    const ParameterList &valid_param_list,
+    const ParameterListIndex &param_list_index, IBufferStorage &buffer_storage,
+    const StackAllocationList &allocation_list,
+    const VariableList &variable_list) {
+
+  // Get the event data from the event object
   auto event_data = builder.CreateGEP(
-      event_stack_ptr, {builder.getInt32(0), builder.getInt32(1)});
+      event_object, {builder.getInt32(0), builder.getInt32(1)});
 
-  // Tracepoints always start with a header made of 5 fields, while Kprobes
-  // use the pt_regs structure
-  std::uint32_t base_struct_index{0U};
-  if (d->event_data.program_type == BPFProgramWriter::ProgramType::Tracepoint) {
-    base_struct_index = 5U;
+  // Get the args parameter from the function
+  auto current_bb = builder.GetInsertBlock();
+  auto current_function = current_bb->getParent();
+  auto args_data = current_function->arg_begin();
+
+  // Go through each parameter and copy it (by value) to the event data
+  // structure
+  for (const auto &param_index_entry : param_list_index) {
+    // Get the source field from the args structure
+    auto args_index =
+        static_cast<std::uint32_t>(param_index_entry.source_index);
+
+    // Kprobes/Uprobes use a thread context structure to pass the BPF program
+    // arguments, so we can't simply access things in order like we do with
+    // tracepoints.
+    //
+    // We have to map the parameter index (1 to 6) to the right register
+    // according to the ABI, and then get the right field from the pt_regs
+    // structure
+    if (enter_event.type() == ebpf::IPerfEvent::Type::Kprobe) {
+      auto args_index_exp = translateParameterNumberToPtregsIndex(args_index);
+      if (!args_index_exp.succeeded()) {
+        return args_index_exp.error();
+      }
+
+      args_index = args_index_exp.takeValue();
+    }
+
+    auto args_field = builder.CreateGEP(
+        args_data, {builder.getInt32(0), builder.getInt32(args_index)});
+
+    auto args_field_value = builder.CreateLoad(args_field);
+
+    // Store the value
+    if (param_index_entry.destination_index_in_opt.has_value()) {
+      auto event_data_index = static_cast<std::uint32_t>(
+          param_index_entry.destination_index_in_opt.value());
+
+      auto event_data_field =
+          builder.CreateGEP(event_data, {builder.getInt32(0),
+                                         builder.getInt32(event_data_index)});
+
+      builder.CreateStore(args_field_value, event_data_field);
+    }
+
+    if (param_index_entry.destination_index_out_opt.has_value()) {
+      auto event_data_index = static_cast<std::uint32_t>(
+          param_index_entry.destination_index_out_opt.value());
+
+      auto event_data_field =
+          builder.CreateGEP(event_data, {builder.getInt32(0),
+                                         builder.getInt32(event_data_index)});
+
+      builder.CreateStore(args_field_value, event_data_field);
+    }
   }
 
-  for (std::uint32_t source_index = base_struct_index;
-       source_index < d->event_data.enter_structure.size(); ++source_index) {
+  // Capture the IN parameters
+  std::unordered_map<std::string, llvm::Value *> integer_parameter_map;
 
-    const auto &enter_struct_field =
-        d->event_data.enter_structure.at(source_index);
+  auto event_header = builder.CreateGEP(
+      event_object, {builder.getInt32(0), builder.getInt32(0)});
 
-    auto param_bb = llvm::BasicBlock::Create(
-        context, "capture_" + enter_struct_field.name, enter_event_function);
+  auto probe_error_flag = builder.CreateGEP(
+      event_header, {builder.getInt32(0), builder.getInt32(7)});
 
-    builder.CreateBr(param_bb);
-    builder.SetInsertPoint(param_bb);
+  for (const auto &param_index_entry : param_list_index) {
+    if (!param_index_entry.destination_index_in_opt.has_value()) {
+      continue;
+    }
 
-    auto destination_index = source_index - base_struct_index;
-    auto destination_ptr = builder.CreateGEP(
-        event_data, {builder.getInt32(0), builder.getInt32(destination_index)});
+    const auto &param = valid_param_list.at(param_index_entry.param_index);
 
-    llvm::Value *source_ptr = nullptr;
-    if (d->event_data.program_type ==
-        BPFProgramWriter::ProgramType::Tracepoint) {
-      auto function_argument = enter_event_function->arg_begin();
+    auto event_data_index = static_cast<std::uint32_t>(
+        param_index_entry.destination_index_in_opt.value());
 
-      source_ptr = builder.CreateGEP(
-          function_argument,
-          {builder.getInt32(0), builder.getInt32(source_index)});
+    auto event_data_field = builder.CreateGEP(
+        event_data, {builder.getInt32(0), builder.getInt32(event_data_index)});
+
+    if (param.type == Parameter::Type::Integer) {
+      integer_parameter_map.insert({"in:" + param.name, event_data_field});
+
+    } else if (param.type == Parameter::Type::IntegerPtr) {
+      captureIntegerByPointer(builder, bpf_syscall_interface, param,
+                              event_data_field, probe_error_flag);
+
+      integer_parameter_map.insert({"in:" + param.name, event_data_field});
+
+    } else if (param.type == Parameter::Type::Buffer) {
+      if (!param.opt_size_var.has_value()) {
+        return StringError::create("Missing size field for Buffer parameter");
+      }
+
+      const auto &size_var = param.opt_size_var.value();
+      llvm::Value *buffer_size = nullptr;
+
+      if (std::holds_alternative<std::size_t>(size_var)) {
+        auto size = std::get<std::size_t>(size_var);
+        buffer_size = builder.getInt32(static_cast<std::uint32_t>(size));
+
+      } else if (std::holds_alternative<std::string>(size_var)) {
+        const auto &size_var_name = std::get<std::string>(size_var);
+
+        auto size_ref_it = integer_parameter_map.find("in:" + size_var_name);
+        if (size_ref_it == integer_parameter_map.end()) {
+          return StringError::create(
+              "Invalid size reference for Buffer parameter named " +
+              param.name);
+        }
+
+        const auto &size_integer_ptr = size_ref_it->second;
+
+        // Integers from the event data structure are always 64-bit. When
+        // capturing buffers we always use 32-bit size values
+        buffer_size = builder.CreateLoad(size_integer_ptr);
+
+        buffer_size =
+            builder.CreateIntCast(buffer_size, builder.getInt32Ty(), false);
+
+        buffer_size = builder.CreateBinOp(llvm::Instruction::And, buffer_size,
+                                          builder.getInt32(0x7FFFFFFF));
+
+      } else {
+        return StringError::create(
+            "Invalid size field type for Buffer parameter");
+      }
+
+      auto success_exp =
+          captureBuffer(builder, bpf_syscall_interface, buffer_storage,
+                        allocation_list, variable_list, event_data_field,
+                        param.name, probe_error_flag, buffer_size);
+
+      if (success_exp.failed()) {
+        return success_exp.error();
+      }
+
+    } else if (param.type == Parameter::Type::String) {
+      auto success_exp = captureString(
+          builder, bpf_syscall_interface, buffer_storage, allocation_list,
+          variable_list, event_data_field, param.name, probe_error_flag);
+
+      if (success_exp.failed()) {
+        return success_exp.error();
+      }
+
+    } else if (param.type == Parameter::Type::Argv) {
 
     } else {
-      auto pt_regs_ptr = enter_event_function->arg_begin();
-
-      if (d->event_data.program_type == BPFProgramWriter::ProgramType::Kprobe) {
-        // TODO: overwrite pt_regs_ptr with the user pt_regs
-      }
-
-      auto source_ptr_exp = getRegisterForParameterIndex(
-          builder, pt_regs_ptr, source_index, destination_ptr->getType());
-
-      if (!source_ptr_exp.succeeded()) {
-        return source_ptr_exp.error();
-      }
-
-      source_ptr = source_ptr_exp.takeValue();
-    }
-
-    auto value = builder.CreateLoad(source_ptr);
-    builder.CreateStore(value, destination_ptr);
-  }
-
-  // Store the event data we collected inside the event map
-  bpf_syscall_interface.mapUpdateElem(d->program_resources.event_map->fd(),
-                                      event_stack_ptr, event_entry_key,
-                                      BPF_ANY);
-
-  // Initialize the program writer, if required by the serializer
-  bpf_prog_writer.clearSavedValues();
-
-  if (d->serializer->stages().count(IFunctionSerializer::Stage::Enter) > 0U) {
-    /// Get the event entry pointer
-    auto event_map_fd = d->program_resources.event_map->fd();
-
-    auto event_entry = bpf_syscall_interface.mapLookupElem(
-        event_map_fd, event_entry_key, event_entry_type_ptr);
-
-    auto null_event_entry_ptr =
-        llvm::Constant::getNullValue(event_entry->getType());
-
-    auto check_event_entry_ptr_condition =
-        builder.CreateICmpEQ(null_event_entry_ptr, event_entry);
-
-    auto invalid_event_entry_bb = llvm::BasicBlock::Create(
-        context, "invalid_event_entry", enter_event_function);
-
-    auto valid_event_entry_bb = llvm::BasicBlock::Create(
-        context, "valid_event_entry", enter_event_function);
-
-    builder.CreateCondBr(check_event_entry_ptr_condition,
-                         invalid_event_entry_bb, valid_event_entry_bb);
-
-    builder.SetInsertPoint(invalid_event_entry_bb);
-    builder.CreateRet(builder.getInt64(0));
-
-    builder.SetInsertPoint(valid_event_entry_bb);
-
-    // Get the buffer storage index
-    auto &buffer_storage_impl = static_cast<BufferStorage &>(d->buffer_storage);
-
-    builder.CreateStore(builder.getInt32(0), buffer_storage_entry_key);
-
-    auto buffer_storage_index = bpf_syscall_interface.mapLookupElem(
-        buffer_storage_impl.indexMap(), buffer_storage_entry_key,
-        llvm::Type::getInt32PtrTy(context));
-
-    auto null_buffer_storage_index =
-        llvm::Constant::getNullValue(buffer_storage_index->getType());
-
-    auto check_buffer_storage_index_condition =
-        builder.CreateICmpEQ(buffer_storage_index, null_buffer_storage_index);
-
-    auto invalid_buffer_storage_index_bb = llvm::BasicBlock::Create(
-        context, "invalid_buffer_storage_index", enter_event_function);
-
-    auto acquire_buffer_stack_bb = llvm::BasicBlock::Create(
-        context, "acquire_buffer_stack", enter_event_function);
-
-    builder.CreateCondBr(check_buffer_storage_index_condition,
-                         invalid_buffer_storage_index_bb,
-                         acquire_buffer_stack_bb);
-
-    builder.SetInsertPoint(invalid_buffer_storage_index_bb);
-    builder.CreateRet(builder.getInt64(0));
-
-    // Acquire the buffer stack
-    builder.SetInsertPoint(acquire_buffer_stack_bb);
-
-    auto buffer_stack_map_fd = d->program_resources.buffer_stack_map->fd();
-
-    auto buffer_storage_stack = bpf_syscall_interface.mapLookupElem(
-        buffer_stack_map_fd, buffer_storage_entry_key, builder.getInt8PtrTy());
-
-    auto null_buffer_stack =
-        llvm::Constant::getNullValue(buffer_storage_stack->getType());
-
-    auto check_buffer_stack_condition =
-        builder.CreateICmpEQ(buffer_storage_stack, null_buffer_stack);
-
-    auto invalid_buffer_stack_bb = llvm::BasicBlock::Create(
-        context, "invalid_buffer_stack", enter_event_function);
-
-    auto continue_bb =
-        llvm::BasicBlock::Create(context, "continue", enter_event_function);
-
-    builder.CreateCondBr(check_buffer_stack_condition, invalid_buffer_stack_bb,
-                         continue_bb);
-
-    builder.SetInsertPoint(invalid_buffer_stack_bb);
-    builder.CreateRet(builder.getInt64(0));
-
-    builder.SetInsertPoint(continue_bb);
-
-    auto success_exp = initializeProgramWriter(
-        bpf_prog_writer, buffer_storage_entry_key, event_entry,
-        buffer_storage_index, buffer_storage_stack, scratch_space_32,
-        scratch_space_64);
-
-    if (success_exp.failed()) {
-      return success_exp.error();
+      return StringError::create("Invalid parameter type encountered");
     }
   }
 
   return {};
 }
 
-SuccessOrStringError
-FunctionTracer::finalizeEnterFunction(BPFProgramWriter &bpf_prog_writer) {
-
-  // Invoke the serializer, if needed
-  if (d->serializer->stages().count(IFunctionSerializer::Stage::Enter) > 0U) {
-    auto success_exp =
-        d->serializer->generate(IFunctionSerializer::Stage::Enter,
-                                d->event_data.enter_structure, bpf_prog_writer);
-
-    if (success_exp.failed()) {
-      return success_exp.error();
-    }
-  }
-
-  // Terminate the function
-  auto &builder = bpf_prog_writer.builder();
-  builder.CreateRet(builder.getInt64(0));
-
-  //
-  // Make sure the module is valid
-  //
-
-  auto &module = bpf_prog_writer.module();
-
-  std::string error_buffer;
-  llvm::raw_string_ostream error_stream(error_buffer);
-
-  if (llvm::verifyModule(module, &error_stream) != 0) {
-    error_stream.flush();
-
-    std::string error_message = "Module verification failed";
-    if (!error_buffer.empty()) {
-      error_message += ": " + error_buffer;
-    }
-
-    return StringError::create(error_message);
-  }
-
-  return {};
-}
-
-SuccessOrStringError
-FunctionTracer::initializeExitFunction(BPFProgramWriter &bpf_prog_writer) {
-  auto &builder = bpf_prog_writer.builder();
-  auto &context = bpf_prog_writer.context();
+SuccessOrStringError FunctionTracer::createExitFunction(
+    llvm::Module &module, EventMap &event_map, ebpf::IPerfEvent &exit_event,
+    const ParameterList &parameter_list,
+    const ParameterListIndex &param_list_index, IBufferStorage &buffer_storage,
+    ebpf::PerfEventArray &perf_event_array) {
 
   // Create the function
-  auto event_function_exp = bpf_prog_writer.getExitFunction();
-  if (!event_function_exp.succeeded()) {
-    return event_function_exp.error();
+  auto function_param_type =
+      module.getTypeByName(kExitFunctionParameterTypeName);
+
+  if (function_param_type == nullptr) {
+    return StringError::create("The " + kExitFunctionParameterTypeName +
+                               " type is not defined");
   }
 
-  auto exit_event_function = event_function_exp.takeValue();
+  auto function_type =
+      llvm::FunctionType::get(llvmTypeForMemoryPointer(module),
+                              {function_param_type->getPointerTo()}, false);
+
+  auto function_ptr =
+      llvm::Function::Create(function_type, llvm::Function::ExternalLinkage,
+                             kExitFunctionName, module);
+
+  if (function_ptr == nullptr) {
+    return StringError::create("Failed to create the exit function");
+  }
+
+  function_ptr->setSection(kExitFunctionName + "_section");
+
+  auto exit_function_args = function_ptr->arg_begin();
+  exit_function_args->setName("args");
 
   // Generate the entry basic block
-  auto entry_bb =
-      llvm::BasicBlock::Create(context, "entry", exit_event_function);
+  auto &context = module.getContext();
+  llvm::IRBuilder<> builder(context);
 
+  auto entry_bb = llvm::BasicBlock::Create(context, "entry", function_ptr);
   builder.SetInsertPoint(entry_bb);
 
-  // Allocate all buffers in advance
-  auto event_entry_key = builder.CreateAlloca(builder.getInt64Ty());
-  auto buffer_storage_entry_key = builder.CreateAlloca(builder.getInt32Ty());
+  // Allocate the required stack space
+  StackAllocationList stack_allocation_list;
 
-  llvm::Value *scratch_space_32{nullptr};
-  llvm::Value *scratch_space_64{nullptr};
+  auto success_exp =
+      allocateStackSpace(stack_allocation_list, "generic_map_index_32", builder,
+                         builder.getInt32Ty());
 
-  if (d->serializer->stages().count(IFunctionSerializer::Stage::Enter) > 0U) {
-    scratch_space_32 = builder.CreateAlloca(builder.getInt32Ty());
-    scratch_space_64 = builder.CreateAlloca(builder.getInt64Ty());
+  if (success_exp.failed()) {
+    return success_exp.error();
   }
 
-  // Get the event entry
-  auto &bpf_syscall_interface = bpf_prog_writer.bpfSyscallInterface();
+  success_exp =
+      allocateStackSpace(stack_allocation_list, "generic_map_index_64", builder,
+                         builder.getInt64Ty());
 
-  auto current_pid_tgid = bpf_syscall_interface.getCurrentPidTgid();
-  builder.CreateStore(current_pid_tgid, event_entry_key);
-
-  auto event_entry_type_exp = bpf_prog_writer.getEventEntryType();
-  if (!event_entry_type_exp.succeeded()) {
-    return event_entry_type_exp.error();
+  if (success_exp.failed()) {
+    return success_exp.error();
   }
 
-  auto event_entry_type = event_entry_type_exp.takeValue();
-  auto event_entry_type_ptr = event_entry_type->getPointerTo();
-  auto event_map_fd = d->program_resources.event_map->fd();
+  success_exp = allocateStackSpace(stack_allocation_list, "event_key", builder,
+                                   builder.getInt64Ty());
 
-  auto event_entry = bpf_syscall_interface.mapLookupElem(
-      event_map_fd, event_entry_key, event_entry_type_ptr);
-
-  auto null_event_entry_ptr =
-      llvm::Constant::getNullValue(event_entry->getType());
-
-  auto check_event_entry_ptr_condition =
-      builder.CreateICmpEQ(null_event_entry_ptr, event_entry);
-
-  auto invalid_event_entry_bb = llvm::BasicBlock::Create(
-      context, "invalid_event_entry", exit_event_function);
-
-  auto valid_event_entry_bb = llvm::BasicBlock::Create(
-      context, "valid_event_entry", exit_event_function);
-
-  builder.CreateCondBr(check_event_entry_ptr_condition, invalid_event_entry_bb,
-                       valid_event_entry_bb);
-
-  builder.SetInsertPoint(invalid_event_entry_bb);
-  builder.CreateRet(builder.getInt64(0));
-
-  builder.SetInsertPoint(valid_event_entry_bb);
-
-  // Initialize the program writer, if required by the serializer
-  bpf_prog_writer.clearSavedValues();
-
-  if (d->serializer->stages().count(IFunctionSerializer::Stage::Exit) == 0U) {
-    bpf_prog_writer.setValue("event_entry", event_entry);
-
-  } else {
-    // Acquire the buffer storage index
-    builder.CreateStore(builder.getInt32(0), buffer_storage_entry_key);
-
-    auto &buffer_storage_impl = static_cast<BufferStorage &>(d->buffer_storage);
-
-    auto buffer_storage_index = bpf_syscall_interface.mapLookupElem(
-        buffer_storage_impl.indexMap(), buffer_storage_entry_key,
-        llvm::Type::getInt32PtrTy(context));
-
-    auto null_buffer_storage_index =
-        llvm::Constant::getNullValue(buffer_storage_index->getType());
-
-    auto check_buffer_storage_index_condition =
-        builder.CreateICmpEQ(buffer_storage_index, null_buffer_storage_index);
-
-    auto invalid_buffer_storage_index_bb = llvm::BasicBlock::Create(
-        context, "invalid_buffer_storage_index", exit_event_function);
-
-    auto acquire_buffer_stack_bb = llvm::BasicBlock::Create(
-        context, "acquire_buffer_stack", exit_event_function);
-
-    builder.CreateCondBr(check_buffer_storage_index_condition,
-                         invalid_buffer_storage_index_bb,
-                         acquire_buffer_stack_bb);
-
-    builder.SetInsertPoint(invalid_buffer_storage_index_bb);
-    builder.CreateRet(builder.getInt64(0));
-
-    // Acquire the buffer stack
-    builder.SetInsertPoint(acquire_buffer_stack_bb);
-
-    auto buffer_stack_map_fd = d->program_resources.buffer_stack_map->fd();
-
-    auto buffer_storage_stack = bpf_syscall_interface.mapLookupElem(
-        buffer_stack_map_fd, buffer_storage_entry_key, builder.getInt8PtrTy());
-
-    auto null_buffer_stack =
-        llvm::Constant::getNullValue(buffer_storage_stack->getType());
-
-    auto check_buffer_stack_condition =
-        builder.CreateICmpEQ(buffer_storage_stack, null_buffer_stack);
-
-    auto invalid_buffer_stack_bb = llvm::BasicBlock::Create(
-        context, "invalid_buffer_stack", exit_event_function);
-
-    auto valid_buffer_stack_bb = llvm::BasicBlock::Create(
-        context, "valid_buffer_stack", exit_event_function);
-
-    builder.CreateCondBr(check_buffer_stack_condition, invalid_buffer_stack_bb,
-                         valid_buffer_stack_bb);
-
-    builder.SetInsertPoint(invalid_buffer_stack_bb);
-    builder.CreateRet(builder.getInt64(0));
-
-    builder.SetInsertPoint(valid_buffer_stack_bb);
-
-    auto success_exp = initializeProgramWriter(
-        bpf_prog_writer, buffer_storage_entry_key, event_entry,
-        buffer_storage_index, buffer_storage_stack, scratch_space_32,
-        scratch_space_64);
-
-    if (success_exp.failed()) {
-      return success_exp.error();
-    }
+  if (success_exp.failed()) {
+    return success_exp.error();
   }
 
-  // Fill in the the exit code of the function
-  llvm::Value *exit_code_value{nullptr};
-
-  if (d->event_data.program_type == BPFProgramWriter::ProgramType::Tracepoint) {
-    // clang-format off
-    auto exit_code_it = std::find_if(
-      d->event_data.exit_structure.begin(),
-      d->event_data.exit_structure.end(),
-
-      [](const auto &structure_field) -> bool {
-        return structure_field.name == "ret";
-      }
-    );
-    // clang-format on
-
-    if (exit_code_it == d->event_data.exit_structure.end()) {
-      return StringError::create(
-          "Failed to locate the tracepoint syscall exit code");
-    }
-
-    auto exit_code_index = static_cast<std::uint32_t>(
-        exit_code_it - d->event_data.exit_structure.begin());
-
-    auto exit_code_struct_index = builder.getInt32(exit_code_index);
-
-    auto exit_code =
-        builder.CreateGEP(exit_event_function->arg_begin(),
-                          {builder.getInt32(0), exit_code_struct_index});
-
-    exit_code_value = builder.CreateLoad(exit_code);
-
-  } else {
-    auto exit_code_exp = getPtRegsParameterFromName(
-        builder, exit_event_function->arg_begin(), "rax");
-
-    if (!exit_code_exp.succeeded()) {
-      return StringError::create("Failed to locate the syscall exit code");
-    }
-
-    auto exit_code = exit_code_exp.takeValue();
-    exit_code_value = builder.CreateLoad(exit_code);
+  // Generate a key for the event map
+  auto bpf_syscall_interface_exp = ebpf::BPFSyscallInterface::create(builder);
+  if (!bpf_syscall_interface_exp.succeeded()) {
+    return bpf_syscall_interface_exp.error();
   }
 
+  auto bpf_syscall_interface = bpf_syscall_interface_exp.takeValue();
+  auto event_key_value = bpf_syscall_interface->getCurrentPidTgid();
+
+  auto event_key_exp = getStackAllocation(stack_allocation_list, "event_key");
+
+  if (!event_key_exp.succeeded()) {
+    return event_key_exp.error();
+  }
+
+  auto event_key = event_key_exp.takeValue();
+  builder.CreateStore(event_key_value, event_key);
+
+  // Acquire the event object stored by the entry program
+  auto event_type = module.getTypeByName(kEventTypeName);
+  if (event_type == nullptr) {
+    return StringError::create("The " + kEventTypeName +
+                               " type is not defined");
+  }
+
+  auto event_entry_exp =
+      getMapEntry(event_map.fd(), builder, *bpf_syscall_interface.get(),
+                  stack_allocation_list, event_key_value,
+                  event_type->getPointerTo(), "event_entry");
+
+  if (!event_entry_exp.succeeded()) {
+    return event_entry_exp.error();
+  }
+
+  auto event_entry = event_entry_exp.takeValue();
+
+  // Get the event header from the event object
   auto event_header = builder.CreateGEP(
       event_entry, {builder.getInt32(0), builder.getInt32(0)});
 
-  auto header_exit_code = builder.CreateGEP(
-      event_header, {builder.getInt32(0), builder.getInt32(5)});
+  auto event_header_exit_code = builder.CreateGEP(
+      event_header, {builder.getInt32(0), builder.getInt32(6)});
 
-  builder.CreateStore(exit_code_value, header_exit_code);
+  // Update the exit code in the event header
+  llvm::Value *function_exit_code_value{nullptr};
 
-  // Create a new block for the serializer
-  auto serializer_entry_bb = llvm::BasicBlock::Create(
-      context, "serializer_entry", exit_event_function);
+  if (exit_event.type() == ebpf::IPerfEvent::Type::Tracepoint) {
+    // Skip the tracepoint header and get the 'ret' parameter
+    auto function_exit_code = builder.CreateGEP(
+        exit_function_args, {builder.getInt32(0), builder.getInt32(5)});
 
-  builder.CreateBr(serializer_entry_bb);
-  builder.SetInsertPoint(serializer_entry_bb);
+    function_exit_code_value = builder.CreateLoad(function_exit_code);
 
-  return {};
-}
+  } else {
+    // TODO(alessandro): other architectures will use a different register
+    auto function_exit_code_value_exp =
+        getPtRegsParameterFromName(builder, exit_function_args, "rax");
 
-SuccessOrStringError
-FunctionTracer::finalizeExitFunction(BPFProgramWriter &bpf_prog_writer) {
-
-  if (d->serializer->stages().count(IFunctionSerializer::Stage::Exit) > 0U) {
-    auto success_exp =
-        d->serializer->generate(IFunctionSerializer::Stage::Exit,
-                                d->event_data.enter_structure, bpf_prog_writer);
-
-    if (success_exp.failed()) {
-      return success_exp.error();
+    if (!function_exit_code_value_exp.succeeded()) {
+      return function_exit_code_value_exp.error();
     }
+
+    auto function_exit_code_index = function_exit_code_value_exp.takeValue();
+
+    function_exit_code_value = builder.CreateLoad(function_exit_code_index);
   }
 
-  // Make sure the event entry is defined; it's what we have to write
-  auto value_exp = bpf_prog_writer.value("event_entry");
-  if (!value_exp.succeeded()) {
-    return StringError::create("The event_entry value is not setx");
+  builder.CreateStore(function_exit_code_value, event_header_exit_code);
+
+  // Acquire the buffer storage index generator
+  auto buffer_storage_index_generator_exp = getMapEntry(
+      buffer_storage.indexMap(), builder, *bpf_syscall_interface.get(),
+      stack_allocation_list, builder.getInt32(0),
+      builder.getInt32Ty()->getPointerTo(), "buffer_storage_index_generator");
+
+  if (!buffer_storage_index_generator_exp.succeeded()) {
+    return buffer_storage_index_generator_exp.error();
   }
 
-  auto event_entry = value_exp.takeValue();
+  auto buffer_storage_index_generator =
+      buffer_storage_index_generator_exp.takeValue();
+
+  VariableList variable_list;
+  success_exp = saveVariable(variable_list, "buffer_storage_index_generator",
+                             buffer_storage_index_generator);
+
+  if (success_exp.failed()) {
+    return success_exp.error();
+  }
+
+  // Generate the event data
+  success_exp = generateExitEventData(
+      builder, exit_event, *bpf_syscall_interface.get(), event_entry,
+      parameter_list, param_list_index, buffer_storage, stack_allocation_list,
+      variable_list);
+
+  if (success_exp.failed()) {
+    return success_exp.error();
+  }
+
+  // Send the data through perf_event
+  auto perf_event_fd = perf_event_array.fd();
 
   auto event_entry_size = static_cast<std::uint32_t>(
-      d->program_resources.event_stack_map->valueSize());
+      ebpf::getLLVMStructureSize(event_type, &module));
 
-  // Get the exit function
-  auto &builder = bpf_prog_writer.builder();
-  auto &context = bpf_prog_writer.context();
+  bpf_syscall_interface->perfEventOutput(exit_function_args, perf_event_fd,
+                                         event_entry, event_entry_size);
 
-  auto exit_function_exp = bpf_prog_writer.getExitFunction();
-  if (!exit_function_exp.succeeded()) {
-    return exit_function_exp.error();
+  // Delete the event from the map
+  bpf_syscall_interface->mapDeleteElem(event_map.fd(), event_key);
+
+  builder.CreateRet(builder.getInt64(0));
+  return {};
+}
+
+SuccessOrStringError FunctionTracer::generateExitEventData(
+    llvm::IRBuilder<> &builder, ebpf::IPerfEvent &exit_event,
+    ebpf::BPFSyscallInterface &bpf_syscall_interface, llvm::Value *event_object,
+    const ParameterList &valid_param_list,
+    const ParameterListIndex &param_list_index, IBufferStorage &buffer_storage,
+    const StackAllocationList &allocation_list,
+    const VariableList &variable_list) {
+
+  // Get the event data from the event object
+  auto event_data = builder.CreateGEP(
+      event_object, {builder.getInt32(0), builder.getInt32(1)});
+
+  // Get the event header from the event object
+  auto event_header = builder.CreateGEP(
+      event_object, {builder.getInt32(0), builder.getInt32(0)});
+
+  auto probe_error_flag = builder.CreateGEP(
+      event_header, {builder.getInt32(0), builder.getInt32(7)});
+
+  // Map all the integer fields
+  std::unordered_map<std::string, llvm::Value *> integer_parameter_map;
+
+  for (const auto &param_index_entry : param_list_index) {
+    const auto &param = valid_param_list.at(param_index_entry.param_index);
+
+    if (param.type == Parameter::Type::Integer ||
+        param.type == Parameter::Type::IntegerPtr) {
+
+      if (param_index_entry.destination_index_in_opt.has_value()) {
+        auto event_data_index = static_cast<std::uint32_t>(
+            param_index_entry.destination_index_in_opt.value());
+
+        auto event_data_field =
+            builder.CreateGEP(event_data, {builder.getInt32(0),
+                                           builder.getInt32(event_data_index)});
+
+        integer_parameter_map.insert({"in:" + param.name, event_data_field});
+      }
+
+      if (param_index_entry.destination_index_out_opt.has_value()) {
+
+        auto event_data_index = static_cast<std::uint32_t>(
+            param_index_entry.destination_index_out_opt.value());
+
+        auto event_data_field =
+            builder.CreateGEP(event_data, {builder.getInt32(0),
+                                           builder.getInt32(event_data_index)});
+
+        integer_parameter_map.insert({"out:" + param.name, event_data_field});
+      }
+    }
   }
 
-  auto exit_function = exit_function_exp.takeValue();
+  // Capture the OUT parameters
+  for (const auto &param_index_entry : param_list_index) {
+    const auto &param = valid_param_list.at(param_index_entry.param_index);
 
-  // Create a new basic block
-  auto finalize_bb =
-      llvm::BasicBlock::Create(context, "finalize", exit_function);
-
-  builder.CreateBr(finalize_bb);
-  builder.SetInsertPoint(finalize_bb);
-
-  // Send the event entry through perf_event
-  auto perf_event_array_fd = d->perf_event_array.fd();
-  auto bpf_context = exit_function->arg_begin();
-  auto &bpf_syscall_interface = bpf_prog_writer.bpfSyscallInterface();
-
-  bpf_syscall_interface.perfEventOutput(bpf_context, perf_event_array_fd,
-                                        static_cast<std::uint32_t>(-1LL),
-                                        event_entry, event_entry_size);
-
-  // Terminate the function
-  builder.CreateRet(builder.getInt64(0));
-
-  // Make sure the module is still valid
-  auto &module = bpf_prog_writer.module();
-
-  std::string error_buffer;
-  llvm::raw_string_ostream error_stream(error_buffer);
-
-  if (llvm::verifyModule(module, &error_stream) != 0) {
-    error_stream.flush();
-
-    std::string error_message = "Module verification failed";
-    if (!error_buffer.empty()) {
-      error_message += ": " + error_buffer;
+    if (!param_index_entry.destination_index_out_opt.has_value()) {
+      continue;
     }
 
-    return StringError::create(error_message);
+    auto event_data_index = static_cast<std::uint32_t>(
+        param_index_entry.destination_index_out_opt.value());
+
+    auto event_data_field = builder.CreateGEP(
+        event_data, {builder.getInt32(0), builder.getInt32(event_data_index)});
+
+    if (param.type == Parameter::Type::IntegerPtr) {
+      captureIntegerByPointer(builder, bpf_syscall_interface, param,
+                              event_data_field, probe_error_flag);
+
+    } else if (param.type == Parameter::Type::Buffer) {
+      if (!param.opt_size_var.has_value()) {
+        return StringError::create("Missing size field for Buffer parameter");
+      }
+
+      const auto &size_var = param.opt_size_var.value();
+      llvm::Value *buffer_size = nullptr;
+
+      if (std::holds_alternative<std::size_t>(size_var)) {
+        auto size = std::get<std::size_t>(size_var);
+        buffer_size = builder.getInt32(static_cast<std::uint32_t>(size));
+
+      } else if (std::holds_alternative<std::string>(size_var)) {
+        const auto &size_var_name = std::get<std::string>(size_var);
+
+        auto size_ref_it = integer_parameter_map.find("out:" + size_var_name);
+        if (size_ref_it == integer_parameter_map.end()) {
+          return StringError::create(
+              "Invalid size reference for Buffer parameter named " +
+              param.name);
+        }
+
+        const auto &size_integer_ptr = size_ref_it->second;
+
+        // Integers from the event data structure are always 64-bit. When
+        // capturing buffers we always use 32-bit size values
+        buffer_size = builder.CreateLoad(size_integer_ptr);
+
+        buffer_size =
+            builder.CreateIntCast(buffer_size, builder.getInt32Ty(), false);
+
+        buffer_size = builder.CreateBinOp(llvm::Instruction::And, buffer_size,
+                                          builder.getInt32(0x7FFFFFFF));
+
+      } else {
+        return StringError::create(
+            "Invalid size field type for Buffer parameter");
+      }
+
+      auto success_exp =
+          captureBuffer(builder, bpf_syscall_interface, buffer_storage,
+                        allocation_list, variable_list, event_data_field,
+                        param.name, probe_error_flag, buffer_size);
+
+      if (success_exp.failed()) {
+        return success_exp.error();
+      }
+
+    } else if (param.type == Parameter::Type::String) {
+      auto success_exp = captureString(
+          builder, bpf_syscall_interface, buffer_storage, allocation_list,
+          variable_list, event_data_field, param.name, probe_error_flag);
+
+      if (success_exp.failed()) {
+        return success_exp.error();
+      }
+
+    } else if (param.type == Parameter::Type::Argv) {
+
+    } else {
+      return StringError::create("Invalid parameter type encountered");
+    }
   }
 
   return {};
 }
 
-StringErrorOr<IFunctionTracer::Ref>
-IFunctionTracer::createFromSyscallTracepoint(
-    const std::string &name, IBufferStorage &buffer_storage,
-    ebpf::PerfEventArray &perf_event_array, std::size_t event_map_size) {
+void FunctionTracer::captureIntegerByPointer(
+    llvm::IRBuilder<> &builder,
+    ebpf::BPFSyscallInterface &bpf_syscall_interface, const Parameter &param,
+    llvm::Value *event_data_field, llvm::Value *probe_error_flag) {
 
-  initializeSerializerFactoryHelper();
+  // Read the integer address first
+  auto buffer_address = builder.CreateLoad(event_data_field);
 
-  FunctionTracer::EventData event_data;
-  event_data.program_type = BPFProgramWriter::ProgramType::Tracepoint;
-  event_data.name = name;
+  // The Parameter structure has already been validated; take the integer size
+  auto integer_size = std::get<std::size_t>(param.opt_size_var.value());
 
-  // Create the enter tracepoint event
-  auto event_name = kEnterEventNamePrefix + name;
+  // Read the integer and update the probe error flag in the event header
+  // The reader will have to extract the value from the 8-bytes buffer
+  auto integer_size_value =
+      builder.getInt32(static_cast<std::uint32_t>(integer_size));
 
-  auto tracepoint_desc_exp =
-      ebpf::TracepointDescriptor::create(kSyscallsEventCategory, event_name);
+  auto read_error = bpf_syscall_interface.probeRead(
+      event_data_field, integer_size_value, buffer_address);
 
-  if (!tracepoint_desc_exp.succeeded()) {
-    throw tracepoint_desc_exp.error();
-  }
+  read_error = builder.CreateBinOp(llvm::Instruction::And, read_error,
+                                   builder.getInt64(0x8000000000000000ULL));
 
-  auto enter_tracepoint_desc = tracepoint_desc_exp.takeValue();
-  event_data.enter_structure = enter_tracepoint_desc->structure();
+  read_error = builder.CreateBinOp(
+      llvm::Instruction::Or, builder.CreateLoad(probe_error_flag), read_error);
 
-  event_name = kSyscallsEventCategory + "/" + event_name;
-  auto perf_event_exp = ebpf::IPerfEvent::createTracepoint(
-      event_name, enter_tracepoint_desc->eventIdentifier());
-
-  if (!perf_event_exp.succeeded()) {
-    throw perf_event_exp.error();
-  }
-
-  event_data.enter_event = perf_event_exp.takeValue();
-
-  // Create the exit tracepoint event
-  event_name = kExitEventNamePrefix + name;
-
-  tracepoint_desc_exp =
-      ebpf::TracepointDescriptor::create(kSyscallsEventCategory, event_name);
-
-  if (!tracepoint_desc_exp.succeeded()) {
-    throw tracepoint_desc_exp.error();
-  }
-
-  auto exit_tracepoint_desc = tracepoint_desc_exp.takeValue();
-  event_data.exit_structure = exit_tracepoint_desc->structure();
-
-  event_name = kSyscallsEventCategory + "/" + event_name;
-  perf_event_exp = ebpf::IPerfEvent::createTracepoint(
-      event_name, exit_tracepoint_desc->eventIdentifier());
-
-  if (!perf_event_exp.succeeded()) {
-    throw perf_event_exp.error();
-  }
-
-  event_data.exit_event = perf_event_exp.takeValue();
-
-  // Obtain a syscall serializer
-  auto serializer_ref_exp = createSerializer(name, buffer_storage);
-  if (!serializer_ref_exp.succeeded()) {
-    throw serializer_ref_exp.error();
-  }
-
-  auto serializer_ref = serializer_ref_exp.takeValue();
-
-  try {
-    return Ref(new FunctionTracer(std::move(event_data),
-                                  std::move(serializer_ref), event_map_size,
-                                  buffer_storage, perf_event_array));
-
-  } catch (const std::bad_alloc &) {
-    return StringError::create("Memory allocation failure");
-
-  } catch (const StringError &error) {
-    return error;
-  }
+  builder.CreateStore(read_error, probe_error_flag);
 }
 
-StringErrorOr<IFunctionTracer::Ref> IFunctionTracer::createFromKprobe(
-    const std::string &name, const ebpf::Structure &args,
-    IBufferStorage &buffer_storage, ebpf::PerfEventArray &perf_event_array,
-    std::size_t event_map_size, IFunctionSerializer::Ref serializer) {
+StringErrorOr<FunctionTracer::EventList> FunctionTracer::parseEventData(
+    BufferReader &buffer_reader, std::uint32_t event_object_size,
+    std::uint64_t event_object_identifier, const std::string &event_name,
+    const ParameterList &parameter_list,
+    const ParameterListIndex &param_list_index,
+    IBufferStorage &buffer_storage) {
 
-  FunctionTracer::EventData event_data;
-  event_data.program_type = BPFProgramWriter::ProgramType::Kprobe;
-  event_data.name = name;
-  event_data.enter_structure = args;
+  EventList output;
 
-  auto identifier = generateKprobeIdentifier();
+  for (;;) {
+    if (buffer_reader.availableBytes() < event_object_size) {
+      return StringError::create(
+          "Not enough bytes to acquire a full event object");
+    }
 
-  auto event_exp = ebpf::IPerfEvent::createKprobe(name, false, identifier);
-  if (!event_exp.succeeded()) {
-    return event_exp.error();
+    auto event_size = buffer_reader.u32();
+    if (event_size != event_object_size) {
+      return StringError::create("Invalid event object size");
+    }
+
+    auto event_id = buffer_reader.u64();
+    if (event_id != event_object_identifier) {
+      return StringError::create("Invalid event object identifier");
+    }
+
+    // Get the event header
+    Event event = {};
+    event.identifier = event_object_identifier;
+    event.name = event_name;
+    event.header.timestamp = buffer_reader.u64();
+
+    auto pid_tgid = buffer_reader.u64();
+    event.header.thread_id = static_cast<pid_t>(pid_tgid & 0xFFFFFFFFULL);
+    event.header.process_id =
+        static_cast<pid_t>((pid_tgid & 0xFFFFFFFF00000000ULL) >> 32U);
+
+    auto uid_gid = buffer_reader.u64();
+    event.header.user_id = static_cast<uid_t>(uid_gid & 0xFFFFFFFFULL);
+    event.header.group_id =
+        static_cast<gid_t>((uid_gid & 0xFFFFFFFF00000000ULL) >> 32U);
+
+    event.header.cgroup_id = buffer_reader.u64();
+    event.header.exit_code = buffer_reader.u64();
+    event.header.probe_error = (buffer_reader.u64() != 0);
+
+    // Get the event data
+    std::unordered_map<std::string, std::uint64_t> integer_parameter_map;
+    std::size_t event_data_fields_read = 0U;
+
+    for (const auto &index_entry : param_list_index) {
+      const auto &param = parameter_list.at(index_entry.param_index);
+
+      // Get the field data from the right offsets
+      std::vector<std::optional<std::uint64_t>> opt_field_value_list;
+
+      if (index_entry.destination_index_in_opt.has_value()) {
+        auto offset = index_entry.destination_index_in_opt.value() * 8U;
+
+        auto value = buffer_reader.peekU64(offset);
+        ++event_data_fields_read;
+
+        opt_field_value_list.push_back(value);
+      } else {
+        opt_field_value_list.push_back({});
+      }
+
+      if (index_entry.destination_index_out_opt.has_value()) {
+        auto offset = index_entry.destination_index_out_opt.value() * 8U;
+
+        auto value = buffer_reader.peekU64(offset);
+        ++event_data_fields_read;
+
+        opt_field_value_list.push_back(value);
+      } else {
+        opt_field_value_list.push_back({});
+      }
+
+      for (auto opt_field_value_it = opt_field_value_list.begin();
+           opt_field_value_it != opt_field_value_list.end();
+           ++opt_field_value_it) {
+
+        bool in_parameter = opt_field_value_it == opt_field_value_list.begin();
+        std::string name_prefix = in_parameter ? "in:" : "out:";
+
+        const auto &opt_field_value = *opt_field_value_it;
+        if (!opt_field_value.has_value()) {
+          continue;
+        }
+
+        Event::Field event_field = {};
+        event_field.in = in_parameter;
+        event_field.name = param.name;
+
+        auto value = opt_field_value.value();
+
+        if (param.type == Parameter::Type::Integer ||
+            param.type == Parameter::Type::IntegerPtr) {
+
+          if (param.type == Parameter::Type::IntegerPtr) {
+            auto integer_size =
+                std::get<std::size_t>(param.opt_size_var.value());
+
+            switch (integer_size) {
+            case 1U:
+              value &= 0xFFULL;
+              break;
+
+            case 2U:
+              value &= 0xFFFFULL;
+              break;
+
+            case 4U:
+              value &= 0xFFFFFFFFULL;
+              break;
+
+            case 8U:
+              break;
+            }
+          }
+
+          event_field.data_var = value;
+          integer_parameter_map.insert({name_prefix + param.name, value});
+
+        } else if (param.type == Parameter::Type::String) {
+          std::vector<std::uint8_t> buffer;
+          auto map_error = buffer_storage.getBuffer(buffer, value);
+          if (map_error.succeeded()) {
+            std::string string_value(buffer.size(), '\0');
+            std::memcpy(&string_value[0], buffer.data(), buffer.size());
+
+            event_field.data_var = std::move(string_value);
+
+          } else {
+            event_field.data_var = std::to_string(value);
+          }
+
+        } else if (param.type == Parameter::Type::Buffer) {
+          Event::Field::Buffer buffer;
+          auto map_error = buffer_storage.getBuffer(buffer, value);
+          if (map_error.succeeded()) {
+            if (!param.opt_size_var.has_value()) {
+              return StringError::create("Buffer parameter named " +
+                                         param.name +
+                                         " does not have a valid size value");
+            }
+
+            const auto &size_var = param.opt_size_var.value();
+
+            std::size_t buffer_size = 0U;
+            if (std::holds_alternative<std::size_t>(size_var)) {
+              buffer_size = std::get<std::size_t>(size_var);
+
+            } else if (std::holds_alternative<std::string>(size_var)) {
+              const auto &size_var_name = std::get<std::string>(size_var);
+              auto integer_name = name_prefix + size_var_name;
+
+              auto integer_it = integer_parameter_map.find(integer_name);
+              if (integer_it == integer_parameter_map.end()) {
+                return StringError::create(
+                    "Buffer parameter named " + param.name +
+                    " uses an invalid size reference: " + integer_name);
+              }
+
+              buffer_size = static_cast<std::size_t>(integer_it->second);
+            }
+
+            buffer_size = std::min(buffer_size, buffer.size());
+            buffer.resize(buffer_size);
+
+            event_field.data_var = std::move(buffer);
+
+          } else {
+            // TODO(alessandro): this is an error, we have to signal this to the
+            // reader!
+            std::cerr << "The buffer for " << param.name << " was not found"
+                      << std::endl;
+
+            event_field.data_var = Event::Field::Buffer();
+          }
+
+        } else if (param.type == Parameter::Type::Argv) {
+          return StringError::create(
+              "Parameter type Argv is not yet supported");
+
+        } else {
+          return StringError::create("Invalid parameter type");
+        }
+
+        event.field_list.push_back(std::move(event_field));
+      }
+    }
+
+    buffer_reader.skipBytes(event_data_fields_read * sizeof(std::uint64_t));
+    output.push_back(std::move(event));
+
+    if (buffer_reader.availableBytes() == 0U) {
+      break;
+    }
+
+    // TODO: keep parsing
+    break;
   }
 
-  event_data.enter_event = event_exp.takeValue();
-
-  event_exp = ebpf::IPerfEvent::createKprobe(name, true, identifier);
-  if (!event_exp.succeeded()) {
-    return event_exp.error();
-  }
-
-  event_data.exit_event = event_exp.takeValue();
-
-  try {
-    return Ref(new FunctionTracer(std::move(event_data), std::move(serializer),
-                                  event_map_size, buffer_storage,
-                                  perf_event_array));
-
-  } catch (const std::bad_alloc &) {
-    return StringError::create("Memory allocation failure");
-
-  } catch (const StringError &error) {
-    return error;
-  }
+  return output;
 }
 
-StringErrorOr<IFunctionTracer::Ref> IFunctionTracer::createFromUprobe(
-    const std::string &name, const std::string &path,
-    const ebpf::Structure &args, IBufferStorage &buffer_storage,
-    ebpf::PerfEventArray &perf_event_array, std::size_t event_map_size,
-    IFunctionSerializer::Ref serializer) {
+SuccessOrStringError FunctionTracer::captureString(
+    llvm::IRBuilder<> &builder,
+    ebpf::BPFSyscallInterface &bpf_syscall_interface,
+    IBufferStorage &buffer_storage, const StackAllocationList &allocation_list,
+    const VariableList &variable_list, llvm::Value *event_data_field,
+    const std::string &parameter_name, llvm::Value *probe_error_flag) {
 
-  initializeSerializerFactoryHelper();
+  // Generate a new buffer storage index
+  auto buffer_storage_index_exp =
+      generateBufferStorageIndex(builder, variable_list, buffer_storage);
 
-  FunctionTracer::EventData event_data;
-  event_data.program_type = BPFProgramWriter::ProgramType::Uprobe;
-  event_data.name = name;
-  event_data.enter_structure = args;
-
-  auto identifier = generateKprobeIdentifier();
-
-  auto event_exp =
-      ebpf::IPerfEvent::createUprobe(name, path, false, identifier);
-
-  if (!event_exp.succeeded()) {
-    return event_exp.error();
+  if (!buffer_storage_index_exp.succeeded()) {
+    return buffer_storage_index_exp.error();
   }
 
-  event_data.enter_event = event_exp.takeValue();
+  auto buffer_storage_index = buffer_storage_index_exp.takeValue();
 
-  event_exp = ebpf::IPerfEvent::createUprobe(name, path, true, identifier);
-  if (!event_exp.succeeded()) {
-    return event_exp.error();
+  // Acquire the buffer storage entry
+  auto buffer_storage_entry_exp =
+      getMapEntry(buffer_storage.bufferMap(), builder, bpf_syscall_interface,
+                  allocation_list, buffer_storage_index, builder.getInt8PtrTy(),
+                  parameter_name + "_buffer_storage");
+
+  if (!buffer_storage_entry_exp.succeeded()) {
+    return buffer_storage_entry_exp.error();
   }
 
-  event_data.exit_event = event_exp.takeValue();
+  auto buffer_storage_entry = buffer_storage_entry_exp.takeValue();
 
-  try {
-    return Ref(new FunctionTracer(std::move(event_data), std::move(serializer),
-                                  event_map_size, buffer_storage,
-                                  perf_event_array));
+  // Read the string
+  auto string_address = builder.CreateLoad(event_data_field);
 
-  } catch (const std::bad_alloc &) {
-    return StringError::create("Memory allocation failure");
+  auto read_error = bpf_syscall_interface.probeReadStr(
+      buffer_storage_entry, buffer_storage.bufferSize(), string_address);
 
-  } catch (const StringError &error) {
-    return error;
+  // Update the probe error flag in the event header
+  read_error = builder.CreateBinOp(llvm::Instruction::And, read_error,
+                                   builder.getInt64(0x8000000000000000ULL));
+
+  read_error = builder.CreateBinOp(
+      llvm::Instruction::Or, builder.CreateLoad(probe_error_flag), read_error);
+
+  builder.CreateStore(read_error, probe_error_flag);
+
+  // Tag the buffer storage index and save it in the event data
+  auto tagged_buffer_storage_index = tagBufferStorageIndex(
+      bpf_syscall_interface, builder, buffer_storage_index);
+
+  builder.CreateStore(tagged_buffer_storage_index, event_data_field);
+
+  return {};
+}
+
+SuccessOrStringError FunctionTracer::captureBuffer(
+    llvm::IRBuilder<> &builder,
+    ebpf::BPFSyscallInterface &bpf_syscall_interface,
+    IBufferStorage &buffer_storage, const StackAllocationList &allocation_list,
+    const VariableList &variable_list, llvm::Value *event_data_field,
+    const std::string &parameter_name, llvm::Value *probe_error_flag,
+    llvm::Value *buffer_size) {
+
+  // Generate a new buffer storage index
+  auto buffer_storage_index_exp =
+      generateBufferStorageIndex(builder, variable_list, buffer_storage);
+
+  if (!buffer_storage_index_exp.succeeded()) {
+    return buffer_storage_index_exp.error();
   }
+
+  auto buffer_storage_index = buffer_storage_index_exp.takeValue();
+
+  // Acquire the buffer storage entry
+  auto buffer_storage_entry_exp =
+      getMapEntry(buffer_storage.bufferMap(), builder, bpf_syscall_interface,
+                  allocation_list, buffer_storage_index, builder.getInt8PtrTy(),
+                  parameter_name + "_buffer_storage");
+
+  if (!buffer_storage_entry_exp.succeeded()) {
+    return buffer_storage_entry_exp.error();
+  }
+
+  auto buffer_storage_entry = buffer_storage_entry_exp.takeValue();
+
+  // Make sure the buffer size is correct
+  auto current_bb = builder.GetInsertBlock();
+  auto &context = current_bb->getContext();
+  auto current_function = current_bb->getParent();
+
+  auto buffer_storage_entry_size =
+      static_cast<std::uint32_t>(buffer_storage.bufferSize());
+
+  auto buffer_size_cond = builder.CreateICmpUGT(
+      buffer_size, builder.getInt32(buffer_storage_entry_size));
+
+  auto invalid_buffer_size_bb = llvm::BasicBlock::Create(
+      context, "invalid_" + parameter_name + "map_entry_buf_size",
+      current_function);
+
+  auto capture_buffer_bb = llvm::BasicBlock::Create(
+      context, "capture_" + parameter_name + "_buffer", current_function);
+
+  builder.CreateCondBr(buffer_size_cond, invalid_buffer_size_bb,
+                       capture_buffer_bb);
+
+  builder.SetInsertPoint(invalid_buffer_size_bb);
+  auto max_buffer_size = builder.getInt32(buffer_storage_entry_size);
+  builder.CreateBr(capture_buffer_bb);
+
+  builder.SetInsertPoint(capture_buffer_bb);
+
+  auto buffer_size_phi = builder.CreatePHI(builder.getInt32Ty(), 2);
+  buffer_size_phi->addIncoming(max_buffer_size, invalid_buffer_size_bb);
+  buffer_size_phi->addIncoming(buffer_size, current_bb);
+
+  // Read the buffer
+  auto buffer_address = builder.CreateLoad(event_data_field);
+
+  auto read_error = bpf_syscall_interface.probeRead(
+      buffer_storage_entry, buffer_size_phi, buffer_address);
+
+  // Update the probe error flag in the event header
+  read_error = builder.CreateBinOp(llvm::Instruction::And, read_error,
+                                   builder.getInt64(0x8000000000000000ULL));
+
+  read_error = builder.CreateBinOp(
+      llvm::Instruction::Or, builder.CreateLoad(probe_error_flag), read_error);
+
+  builder.CreateStore(read_error, probe_error_flag);
+
+  // Tag the buffer storage index and save it in the event data
+  auto tagged_buffer_storage_index = tagBufferStorageIndex(
+      bpf_syscall_interface, builder, buffer_storage_index);
+
+  builder.CreateStore(tagged_buffer_storage_index, event_data_field);
+
+  return {};
 }
 } // namespace tob::ebpfpub

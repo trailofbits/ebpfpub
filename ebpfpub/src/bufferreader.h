@@ -10,39 +10,41 @@
 
 #include <cstdint>
 #include <memory>
+#include <vector>
 
-#include <ebpfpub/ibufferreader.h>
+#include <tob/error/error.h>
 
 namespace tob::ebpfpub {
-class BufferReader final : public IBufferReader {
+class BufferReader final {
 public:
-  using Ref = std::unique_ptr<IBufferReader>;
-  static StringErrorOr<Ref> create(const std::uint8_t *buffer,
-                                   std::size_t buffer_size);
+  using Ref = std::unique_ptr<BufferReader>;
+  static StringErrorOr<Ref> create();
 
-  virtual ~BufferReader() override;
+  ~BufferReader();
 
-  virtual std::size_t offset() const override;
-  virtual void setOffset(std::size_t offset) override;
-  virtual void skipBytes(std::size_t byte_count) override;
+  void reset(const std::vector<std::uint8_t> &buffer);
 
-  virtual std::uint32_t u8() override;
-  virtual std::uint32_t u16() override;
-  virtual std::uint32_t u32() override;
-  virtual std::uint64_t u64() override;
+  std::size_t offset() const;
+  void setOffset(std::size_t offset);
+  void skipBytes(std::size_t byte_count);
 
-  virtual std::uint32_t peekU8(std::size_t offset) override;
-  virtual std::uint32_t peekU16(std::size_t offset) override;
-  virtual std::uint32_t peekU32(std::size_t offset) override;
-  virtual std::uint64_t peekU64(std::size_t offset) override;
+  std::uint32_t u8();
+  std::uint32_t u16();
+  std::uint32_t u32();
+  std::uint64_t u64();
 
-  virtual std::size_t bytesRead() const override;
-  virtual std::size_t availableBytes() const override;
+  std::uint32_t peekU8(std::size_t offset);
+  std::uint32_t peekU16(std::size_t offset);
+  std::uint32_t peekU32(std::size_t offset);
+  std::uint64_t peekU64(std::size_t offset);
+
+  std::size_t bytesRead() const;
+  std::size_t availableBytes() const;
 
 private:
   struct PrivateData;
   std::unique_ptr<PrivateData> d;
 
-  BufferReader(const std::uint8_t *buffer, std::size_t buffer_size);
+  BufferReader();
 };
 } // namespace tob::ebpfpub

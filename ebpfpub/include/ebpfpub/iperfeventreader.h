@@ -9,10 +9,11 @@
 #pragma once
 
 #include <atomic>
+#include <chrono>
+#include <functional>
 #include <memory>
 
 #include <ebpfpub/ibufferstorage.h>
-#include <ebpfpub/ifunctionserializer.h>
 #include <ebpfpub/ifunctiontracer.h>
 
 #include <tob/ebpf/perfeventarray.h>
@@ -20,7 +21,16 @@
 namespace tob::ebpfpub {
 class IPerfEventReader {
 public:
+  struct ErrorCounters final {
+    std::size_t invalid_probe_output{0U};
+    std::size_t invalid_event{0U};
+    std::size_t invalid_event_data{0U};
+    std::size_t lost_events{0U};
+  };
+
   using Ref = std::unique_ptr<IPerfEventReader>;
+  using Callback = std::function<void(const IFunctionTracer::EventList &,
+                                      const ErrorCounters &)>;
 
   static StringErrorOr<Ref> create(ebpf::PerfEventArray &perf_event_array,
                                    IBufferStorage &buffer_storage);
@@ -28,11 +38,9 @@ public:
   IPerfEventReader() = default;
   virtual ~IPerfEventReader() = default;
 
-  virtual void insert(IFunctionTracer::Ref syscall_tracepoint) = 0;
-
-  using Callback = std::function<void(const IFunctionSerializer::EventList &)>;
-  virtual SuccessOrStringError exec(std::atomic_bool &terminate,
-                                    const Callback &callback) = 0;
+  virtual void insert(IFunctionTracer::Ref function_tracer) = 0;
+  virtual SuccessOrStringError exec(const std::chrono::seconds &timeout,
+                                    Callback callback) = 0;
 
   IPerfEventReader(const IPerfEventReader &) = delete;
   IPerfEventReader &operator=(const IPerfEventReader &) = delete;

@@ -49,12 +49,9 @@ function(ebpfpubPackageGenerator)
 
   install(
     FILES
-      "${EBPFPUB_INSTALL_PATH}/usr/local/include/ebpfpub/ibpfprogramwriter.h"
-      "${EBPFPUB_INSTALL_PATH}/usr/local/include/ebpfpub/ibufferreader.h"
       "${EBPFPUB_INSTALL_PATH}/usr/local/include/ebpfpub/ibufferstorage.h"
-      "${EBPFPUB_INSTALL_PATH}/usr/local/include/ebpfpub/ifunctionserializer.h"
-      "${EBPFPUB_INSTALL_PATH}/usr/local/include/ebpfpub/ifunctiontracer.h"
       "${EBPFPUB_INSTALL_PATH}/usr/local/include/ebpfpub/iperfeventreader.h"
+      "${EBPFPUB_INSTALL_PATH}/usr/local/include/ebpfpub/ifunctiontracer.h"
 
     DESTINATION
       "include/ebpfpub"
@@ -91,12 +88,13 @@ function(ebpfpubPackageGenerator)
       "include/tob/error"
   )
 
-
   install(
     FILES
       "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/utils/ielfimage.h"
       "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/utils/uniquefd.h"
       "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/utils/uniqueref.h"
+      "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/utils/uniquemappedmemory.h"
+      "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/utils/architecture.h"
 
     DESTINATION
       "include/tob/utils"
@@ -108,18 +106,6 @@ function(ebpfpubPackageGenerator)
 
     DESTINATION
       "lib"
-  )
-
-  install(
-    FILES
-      "${EBPFPUB_INSTALL_PATH}/usr/local/bin/ebpftracer"
-
-    DESTINATION
-      "bin"
-
-    PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE
-                GROUP_READ GROUP_WRITE GROUP_EXECUTE
-                WORLD_READ             WORLD_EXECUTE
   )
 endfunction()
 
