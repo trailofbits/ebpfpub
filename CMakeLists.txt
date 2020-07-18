@@ -18,12 +18,7 @@ include("cmake/version.cmake")
 
 function(ebpfpubMain)
   add_subdirectory("ebpfpub")
-
-  if(EBPFPUB_BUILD_EXAMPLES)
-    message(STATUS "ebpfpub - Examples are being built")
-
-    add_subdirectory("examples")
-  endif()
+  add_subdirectory("examples")
 endfunction()
 
 ebpfpubMain()
