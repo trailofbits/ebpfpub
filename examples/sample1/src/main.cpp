@@ -258,7 +258,21 @@ void eventParser(
                      tob::ebpfpub::IFunctionTracer::Event::Field::Argv>(
                      field.data_var)) {
 
-        std::cout << "<ARGV_OBJECT>";
+        const auto &argv_data =
+            std::get<tob::ebpfpub::IFunctionTracer::Event::Field::Argv>(
+                field.data_var);
+
+        std::cout << "{ ";
+        for (auto it = argv_data.begin(); it != argv_data.end(); ++it) {
+
+          const auto &argv_entry = *it;
+          std::cout << argv_entry;
+
+          if (std::next(it, 1) < argv_data.end()) {
+            std::cout << ", ";
+          }
+        }
+        std::cout << " }";
 
       } else if (std::holds_alternative<std::string>(field.data_var)) {
         std::cout << std::get<std::string>(field.data_var);
@@ -312,12 +326,8 @@ int main(int argc, char *argv[]) {
   // want to store our strings and buffers, and also the perf event array used
   // by the BPF probe to wake us up
 
-  const std::vector<std::string> kSyscallNameList = {
-      "connect",
-      //"bind",
-      //"accept",
-      //"accept4",
-  };
+  const std::vector<std::string> kSyscallNameList = {"connect", "bind",
+                                                     "accept", "accept4"};
 
   for (const auto &syscall_name : kSyscallNameList) {
     auto function_tracer_exp = generateFunctionTracerForTracepoint(

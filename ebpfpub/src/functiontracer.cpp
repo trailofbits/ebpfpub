@@ -9,7 +9,6 @@
 #include "functiontracer.h"
 #include "abi.h"
 
-#include <iostream>
 #include <limits>
 #include <unordered_set>
 
@@ -78,11 +77,6 @@ FunctionTracer::parseEventData(BufferReader &buffer_reader) const {
   auto event_data_exp = parseEventData(
       buffer_reader, event_object_size, eventIdentifier(), name(),
       d->parameter_list, d->parameter_list_index, d->buffer_storage);
-
-  if (!event_data_exp.succeeded()) {
-    auto error = event_data_exp.error();
-    std::cout << "ERROR: " << error.message() << std::endl;
-  }
 
   return event_data_exp;
 }
@@ -641,9 +635,7 @@ SuccessOrStringError FunctionTracer::validateParameterList(
 
       // Assuming that we need 64-bit pointers for each string, make sure we
       // have enough space into a single buffer storage entry to save the
-      // requested amount of entries.
-      //
-      // Use argv_size + null entry
+      // requested amount of entries
       auto index_space = (argv_size + 1U) * sizeof(std::uint64_t);
       if (index_space >= buffer_storage.bufferSize()) {
         return StringError::create("The buffer storage entry size is too small "
@@ -1499,6 +1491,17 @@ SuccessOrStringError FunctionTracer::generateEnterEventData(
       }
 
     } else if (param.type == Parameter::Type::Argv) {
+      const auto &size_var = param.opt_size_var.value();
+      auto argv_size = std::get<std::size_t>(size_var);
+
+      auto success_exp =
+          captureArgv(builder, bpf_syscall_interface, buffer_storage,
+                      allocation_list, variable_list, event_data_field,
+                      param.name, probe_error_flag, argv_size);
+
+      if (success_exp.failed()) {
+        return success_exp.error();
+      }
 
     } else {
       return StringError::create("Invalid parameter type encountered");
@@ -1817,8 +1820,6 @@ SuccessOrStringError FunctionTracer::generateExitEventData(
         return success_exp.error();
       }
 
-    } else if (param.type == Parameter::Type::Argv) {
-
     } else {
       return StringError::create("Invalid parameter type encountered");
     }
@@ -2027,17 +2028,57 @@ StringErrorOr<FunctionTracer::EventList> FunctionTracer::parseEventData(
             event_field.data_var = std::move(buffer);
 
           } else {
-            // TODO(alessandro): this is an error, we have to signal this to the
-            // reader!
-            std::cerr << "The buffer for " << param.name << " was not found"
-                      << std::endl;
-
+            event.header.probe_error = true;
             event_field.data_var = Event::Field::Buffer();
           }
 
         } else if (param.type == Parameter::Type::Argv) {
-          return StringError::create(
-              "Parameter type Argv is not yet supported");
+          Event::Field::Argv argv_data;
+
+          Event::Field::Buffer buffer;
+          auto map_error = buffer_storage.getBuffer(buffer, value);
+          if (map_error.succeeded()) {
+            const auto &size_var = param.opt_size_var.value();
+            auto argv_size = std::get<std::size_t>(size_var);
+
+            bool terminator_found{false};
+
+            for (auto argv_index = 0U; argv_index < argv_size; ++argv_index) {
+              auto offset = buffer.data() + (argv_index * 8U);
+
+              std::uint64_t buffer_index{0U};
+              std::memcpy(&buffer_index, offset, sizeof(buffer_index));
+
+              if (buffer_index == 0) {
+                terminator_found = true;
+                break;
+              }
+
+              Event::Field::Buffer str_buffer;
+              map_error = buffer_storage.getBuffer(str_buffer, buffer_index);
+              if (map_error.succeeded()) {
+                std::string argv_entry(str_buffer.size(), '\0');
+                std::memcpy(&argv_entry[0], str_buffer.data(),
+                            str_buffer.size());
+
+                argv_data.push_back(argv_entry);
+
+              } else {
+                event.header.probe_error = true;
+                event_field.data_var = Event::Field::Argv();
+              }
+            }
+
+            if (!terminator_found) {
+              event.header.probe_error = true;
+            }
+
+            event_field.data_var = argv_data;
+
+          } else {
+            event.header.probe_error = true;
+            event_field.data_var = Event::Field::Argv();
+          }
 
         } else {
           return StringError::create("Invalid parameter type");
@@ -2195,6 +2236,141 @@ SuccessOrStringError FunctionTracer::captureBuffer(
       bpf_syscall_interface, builder, buffer_storage_index);
 
   builder.CreateStore(tagged_buffer_storage_index, event_data_field);
+
+  return {};
+}
+
+SuccessOrStringError FunctionTracer::captureArgv(
+    llvm::IRBuilder<> &builder,
+    ebpf::BPFSyscallInterface &bpf_syscall_interface,
+    IBufferStorage &buffer_storage, const StackAllocationList &allocation_list,
+    const VariableList &variable_list, llvm::Value *event_data_field,
+    const std::string &parameter_name, llvm::Value *probe_error_flag,
+    std::size_t argv_size) {
+
+  auto current_bb = builder.GetInsertBlock();
+  auto &context = current_bb->getContext();
+  auto current_function = current_bb->getParent();
+
+  //
+  // In order to capture this, we'll reserve a page in the buffer storage
+  // to store all the pointers, and then a page for each string
+  //
+
+  // Create a new structure type for the pointer buffer
+  std::vector<llvm::Type *> array_type_list(argv_size, builder.getInt64Ty());
+
+  auto array_type = llvm::StructType::create(array_type_list,
+                                             "ArgvFor_" + parameter_name, true);
+
+  // Get the first buffer storage entry, used to store the pointer list
+  auto buffer_storage_index_exp =
+      generateBufferStorageIndex(builder, variable_list, buffer_storage);
+
+  if (!buffer_storage_index_exp.succeeded()) {
+    return buffer_storage_index_exp.error();
+  }
+
+  auto buffer_storage_index = buffer_storage_index_exp.takeValue();
+
+  auto pointer_buffer_exp = getMapEntry(
+      buffer_storage.bufferMap(), builder, bpf_syscall_interface,
+      allocation_list, buffer_storage_index, array_type->getPointerTo(),
+      parameter_name + "_pointer_buffer");
+
+  if (!pointer_buffer_exp.succeeded()) {
+    return pointer_buffer_exp.error();
+  }
+
+  auto pointer_buffer = pointer_buffer_exp.takeValue();
+
+  // Go through each argv entry
+  auto end_argv_capture_bb = llvm::BasicBlock::Create(
+      context, parameter_name + "_capture_end", current_function);
+
+  auto argv_address = builder.CreateLoad(event_data_field);
+
+  for (auto argv_index = 0U; argv_index < argv_size; ++argv_index) {
+    // Get the pointer to the current argv entry
+    auto entry_offset =
+        static_cast<std::uint64_t>(argv_index * sizeof(std::uint64_t));
+
+    auto argv_entry_ptr = builder.CreateBinOp(
+        llvm::Instruction::Add, argv_address, builder.getInt64(entry_offset));
+
+    // Get the pointer to the current pointer buffer entry
+    auto pointer_buffer_entry_ptr = builder.CreateGEP(
+        pointer_buffer, {builder.getInt32(0), builder.getInt32(argv_index)});
+
+    builder.CreateStore(argv_entry_ptr, pointer_buffer_entry_ptr);
+
+    // Read the pointer value
+    auto read_error = bpf_syscall_interface.probeRead(
+        pointer_buffer_entry_ptr, builder.getInt64(8U), argv_entry_ptr);
+
+    // Update the probe error flag in the event header
+    read_error = builder.CreateBinOp(llvm::Instruction::And, read_error,
+                                     builder.getInt64(0x8000000000000000ULL));
+
+    read_error =
+        builder.CreateBinOp(llvm::Instruction::Or,
+                            builder.CreateLoad(probe_error_flag), read_error);
+
+    builder.CreateStore(read_error, probe_error_flag);
+
+    // Skip this pointer if we failed to capture it
+    auto read_error_cond =
+        builder.CreateICmpEQ(read_error, builder.getInt64(0));
+
+    auto label = parameter_name + "_argv_" + std::to_string(argv_index);
+
+    auto evaluate_string_ptr_bb = llvm::BasicBlock::Create(
+        context, "evaluate_" + label, current_function);
+
+    auto skip_string_capture_bb =
+        llvm::BasicBlock::Create(context, "skip_" + label, current_function);
+
+    builder.CreateCondBr(read_error_cond, evaluate_string_ptr_bb,
+                         skip_string_capture_bb);
+
+    builder.SetInsertPoint(evaluate_string_ptr_bb);
+
+    // If this is the null pointer, skip to the end
+    auto pointer_buffer_entry = builder.CreateLoad(pointer_buffer_entry_ptr);
+
+    auto capture_string_bb =
+        llvm::BasicBlock::Create(context, "capture_" + label, current_function);
+
+    auto string_pointer_cond =
+        builder.CreateICmpEQ(pointer_buffer_entry, builder.getInt64(0));
+
+    builder.CreateCondBr(string_pointer_cond, end_argv_capture_bb,
+                         capture_string_bb);
+
+    builder.SetInsertPoint(capture_string_bb);
+
+    auto success_exp = captureString(
+        builder, bpf_syscall_interface, buffer_storage, allocation_list,
+        variable_list, pointer_buffer_entry_ptr, label, probe_error_flag);
+
+    if (success_exp.failed()) {
+      return success_exp.error();
+    }
+
+    builder.CreateBr(skip_string_capture_bb);
+    builder.SetInsertPoint(skip_string_capture_bb);
+  }
+
+  // Add the ending basic block
+  builder.CreateBr(end_argv_capture_bb);
+  builder.SetInsertPoint(end_argv_capture_bb);
+
+  // Replace the argv address in the event data structure with the tagged index
+  // for the pointer buffer
+  auto tagged_pointer_buffer_index = tagBufferStorageIndex(
+      bpf_syscall_interface, builder, buffer_storage_index);
+
+  builder.CreateStore(tagged_pointer_buffer_index, event_data_field);
 
   return {};
 }

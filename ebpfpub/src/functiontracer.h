@@ -193,5 +193,14 @@ public:
                 llvm::Value *event_data_field,
                 const std::string &parameter_name,
                 llvm::Value *probe_error_flag, llvm::Value *buffer_size);
+
+  static SuccessOrStringError
+  captureArgv(llvm::IRBuilder<> &builder,
+              ebpf::BPFSyscallInterface &bpf_syscall_interface,
+              IBufferStorage &buffer_storage,
+              const StackAllocationList &allocation_list,
+              const VariableList &variable_list, llvm::Value *event_data_field,
+              const std::string &parameter_name, llvm::Value *probe_error_flag,
+              std::size_t argv_size);
 };
 } // namespace tob::ebpfpub
