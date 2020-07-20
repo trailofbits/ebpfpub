@@ -158,9 +158,9 @@ void initializeParameterListForExecve(ParameterListMap &param_list_map) {
 
     {
       "argv",
-      tob::ebpfpub::IFunctionTracer::Parameter::Type::Integer,
+      tob::ebpfpub::IFunctionTracer::Parameter::Type::Argv,
       tob::ebpfpub::IFunctionTracer::Parameter::Mode::In,
-      8U
+      20U
     },
 
     {
@@ -194,9 +194,9 @@ void initializeParameterListForExecveAt(ParameterListMap &param_list_map) {
 
     {
       "argv",
-      tob::ebpfpub::IFunctionTracer::Parameter::Type::Integer,
+      tob::ebpfpub::IFunctionTracer::Parameter::Type::Argv,
       tob::ebpfpub::IFunctionTracer::Parameter::Mode::In,
-      8U
+      20U
     },
 
     {

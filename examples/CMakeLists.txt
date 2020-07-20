@@ -11,7 +11,9 @@ cmake_minimum_required(VERSION 3.14.6)
 function(ebpfpubExamples)
   if(EBPFPUB_BUILD_EXAMPLES)
     message(STATUS "ebpfpub - Examples are being built")
+
     add_subdirectory("sample1")
+    add_subdirectory("execsnoop")
   endif()
 
   if(EBFPPUB_BUILD_SOCKETMONITOR_EXAMPLE)
