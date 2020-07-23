@@ -20,8 +20,7 @@ public:
                                     Callback callback) override;
 
 protected:
-  PerfEventReader(ebpf::PerfEventArray &perf_event_array,
-                  IBufferStorage &buffer_storage);
+  PerfEventReader(ebpf::PerfEventArray &perf_event_array);
 
 private:
   struct PrivateData;

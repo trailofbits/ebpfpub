@@ -142,8 +142,8 @@ int main(int argc, char *argv[]) {
 
   auto perf_event_array = perf_event_array_exp.takeValue();
 
-  auto perf_event_reader_exp = tob::ebpfpub::IPerfEventReader::create(
-      *perf_event_array.get(), *buffer_storage.get());
+  auto perf_event_reader_exp =
+      tob::ebpfpub::IPerfEventReader::create(*perf_event_array.get());
 
   if (!perf_event_reader_exp.succeeded()) {
     throw std::runtime_error("Failed to create the perf event reader: " +
@@ -168,7 +168,6 @@ int main(int argc, char *argv[]) {
     perf_event_reader->insert(std::move(function_tracer));
   }
 
-  // Main event loop
   while (true) {
     perf_event_reader->exec(std::chrono::seconds(1U), eventParser);
   }

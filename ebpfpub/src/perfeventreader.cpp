@@ -18,12 +18,10 @@
 
 namespace tob::ebpfpub {
 struct PerfEventReader::PrivateData final {
-  PrivateData(ebpf::PerfEventArray &perf_event_array_,
-              IBufferStorage &buffer_storage_)
-      : perf_event_array(perf_event_array_), buffer_storage(buffer_storage_) {}
+  PrivateData(ebpf::PerfEventArray &perf_event_array_)
+      : perf_event_array(perf_event_array_) {}
 
   ebpf::PerfEventArray &perf_event_array;
-  IBufferStorage &buffer_storage;
   BufferReader::Ref buffer_reader;
 
   std::unordered_map<std::uint64_t, IFunctionTracer::Ref> function_tracer_map;
@@ -110,9 +108,8 @@ SuccessOrStringError PerfEventReader::exec(const std::chrono::seconds &timeout,
   return {};
 }
 
-PerfEventReader::PerfEventReader(ebpf::PerfEventArray &perf_event_array,
-                                 IBufferStorage &buffer_storage)
-    : d(new PrivateData(perf_event_array, buffer_storage)) {
+PerfEventReader::PerfEventReader(ebpf::PerfEventArray &perf_event_array)
+    : d(new PrivateData(perf_event_array)) {
 
   auto buffer_reader_exp = BufferReader::create();
   if (!buffer_reader_exp.succeeded()) {
@@ -123,11 +120,10 @@ PerfEventReader::PerfEventReader(ebpf::PerfEventArray &perf_event_array,
 }
 
 StringErrorOr<PerfEventReader::Ref>
-IPerfEventReader::create(ebpf::PerfEventArray &perf_event_array,
-                         IBufferStorage &buffer_storage) {
+IPerfEventReader::create(ebpf::PerfEventArray &perf_event_array) {
 
   try {
-    return Ref(new PerfEventReader(perf_event_array, buffer_storage));
+    return Ref(new PerfEventReader(perf_event_array));
 
   } catch (const std::bad_alloc &) {
     return StringError::create("Memory allocation failure");

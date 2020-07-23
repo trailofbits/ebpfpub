@@ -783,6 +783,10 @@ SuccessOrStringError
 FunctionTracer::createEventDataType(llvm::Module &module,
                                     const ParameterList &valid_param_list) {
 
+  if (valid_param_list.empty()) {
+    return {};
+  }
+
   auto &context = module.getContext();
 
   std::vector<llvm::Type *> type_list;
@@ -832,12 +836,12 @@ SuccessOrStringError FunctionTracer::createEventType(llvm::Module &module) {
     return StringError::create("The event header type is not defined");
   }
 
-  auto event_data_type = module.getTypeByName(kEventDataTypeName);
-  if (event_data_type == nullptr) {
-    return StringError::create("The event data type is not defined");
-  }
+  std::vector<llvm::Type *> type_list = {event_header_type};
 
-  std::vector<llvm::Type *> type_list = {event_header_type, event_data_type};
+  auto event_data_type = module.getTypeByName(kEventDataTypeName);
+  if (event_data_type != nullptr) {
+    type_list.push_back(event_data_type);
+  }
 
   auto event_type = llvm::StructType::create(type_list, kEventTypeName, true);
 
@@ -1341,6 +1345,10 @@ SuccessOrStringError FunctionTracer::generateEnterEventData(
     const StackAllocationList &allocation_list,
     const VariableList &variable_list) {
 
+  if (valid_param_list.empty()) {
+    return {};
+  }
+
   // Get the event data from the event object
   auto event_data = builder.CreateGEP(
       event_object, {builder.getInt32(0), builder.getInt32(1)});
@@ -1700,6 +1708,10 @@ SuccessOrStringError FunctionTracer::generateExitEventData(
     const StackAllocationList &allocation_list,
     const VariableList &variable_list) {
 
+  if (valid_param_list.empty()) {
+    return {};
+  }
+
   // Get the event data from the event object
   auto event_data = builder.CreateGEP(
       event_object, {builder.getInt32(0), builder.getInt32(1)});
@@ -1833,8 +1845,27 @@ void FunctionTracer::captureIntegerByPointer(
     ebpf::BPFSyscallInterface &bpf_syscall_interface, const Parameter &param,
     llvm::Value *event_data_field, llvm::Value *probe_error_flag) {
 
+  auto current_bb = builder.GetInsertBlock();
+  auto &context = current_bb->getContext();
+  auto current_function = current_bb->getParent();
+
   // Read the integer address first
   auto buffer_address = builder.CreateLoad(event_data_field);
+
+  // Skip the read if the pointer is set to nullptr
+  auto buffer_address_cond =
+      builder.CreateICmpEQ(builder.getInt64(0U), buffer_address);
+
+  auto skip_integer_read_bb = llvm::BasicBlock::Create(
+      context, "skip_" + param.name + "_ptr_read", current_function);
+
+  auto read_integer_bb = llvm::BasicBlock::Create(
+      context, "read_" + param.name + "_integer_ptr", current_function);
+
+  builder.CreateCondBr(buffer_address_cond, skip_integer_read_bb,
+                       read_integer_bb);
+
+  builder.SetInsertPoint(read_integer_bb);
 
   // The Parameter structure has already been validated; take the integer size
   auto integer_size = std::get<std::size_t>(param.opt_size_var.value());
@@ -1854,6 +1885,9 @@ void FunctionTracer::captureIntegerByPointer(
       llvm::Instruction::Or, builder.CreateLoad(probe_error_flag), read_error);
 
   builder.CreateStore(read_error, probe_error_flag);
+
+  builder.CreateBr(skip_integer_read_bb);
+  builder.SetInsertPoint(skip_integer_read_bb);
 }
 
 StringErrorOr<FunctionTracer::EventList> FunctionTracer::parseEventData(
@@ -2109,6 +2143,27 @@ SuccessOrStringError FunctionTracer::captureString(
     const VariableList &variable_list, llvm::Value *event_data_field,
     const std::string &parameter_name, llvm::Value *probe_error_flag) {
 
+  auto string_address = builder.CreateLoad(event_data_field);
+
+  // Skip the read if the pointer is set to nullptr
+  auto current_bb = builder.GetInsertBlock();
+  auto &context = current_bb->getContext();
+  auto current_function = current_bb->getParent();
+
+  auto string_address_cond =
+      builder.CreateICmpEQ(builder.getInt64(0U), string_address);
+
+  auto skip_string_read_bb = llvm::BasicBlock::Create(
+      context, "skip_" + parameter_name + "_string_read", current_function);
+
+  auto read_string_bb = llvm::BasicBlock::Create(
+      context, "read_" + parameter_name + "_string", current_function);
+
+  builder.CreateCondBr(string_address_cond, skip_string_read_bb,
+                       read_string_bb);
+
+  builder.SetInsertPoint(read_string_bb);
+
   // Generate a new buffer storage index
   auto buffer_storage_index_exp =
       generateBufferStorageIndex(builder, variable_list, buffer_storage);
@@ -2132,8 +2187,6 @@ SuccessOrStringError FunctionTracer::captureString(
   auto buffer_storage_entry = buffer_storage_entry_exp.takeValue();
 
   // Read the string
-  auto string_address = builder.CreateLoad(event_data_field);
-
   auto read_error = bpf_syscall_interface.probeReadStr(
       buffer_storage_entry, buffer_storage.bufferSize(), string_address);
 
@@ -2152,6 +2205,9 @@ SuccessOrStringError FunctionTracer::captureString(
 
   builder.CreateStore(tagged_buffer_storage_index, event_data_field);
 
+  builder.CreateBr(skip_string_read_bb);
+  builder.SetInsertPoint(skip_string_read_bb);
+
   return {};
 }
 
@@ -2162,6 +2218,27 @@ SuccessOrStringError FunctionTracer::captureBuffer(
     const VariableList &variable_list, llvm::Value *event_data_field,
     const std::string &parameter_name, llvm::Value *probe_error_flag,
     llvm::Value *buffer_size) {
+
+  auto buffer_address = builder.CreateLoad(event_data_field);
+
+  // Skip the read if the pointer is set to nullptr
+  auto current_bb = builder.GetInsertBlock();
+  auto &context = current_bb->getContext();
+  auto current_function = current_bb->getParent();
+
+  auto buffer_address_cond =
+      builder.CreateICmpEQ(builder.getInt64(0U), buffer_address);
+
+  auto skip_buffer_read_bb = llvm::BasicBlock::Create(
+      context, "skip_" + parameter_name + "_buffer_read", current_function);
+
+  auto read_buffer_bb = llvm::BasicBlock::Create(
+      context, "read_" + parameter_name + "_buffer", current_function);
+
+  builder.CreateCondBr(buffer_address_cond, skip_buffer_read_bb,
+                       read_buffer_bb);
+
+  builder.SetInsertPoint(read_buffer_bb);
 
   // Generate a new buffer storage index
   auto buffer_storage_index_exp =
@@ -2186,9 +2263,11 @@ SuccessOrStringError FunctionTracer::captureBuffer(
   auto buffer_storage_entry = buffer_storage_entry_exp.takeValue();
 
   // Make sure the buffer size is correct
-  auto current_bb = builder.GetInsertBlock();
-  auto &context = current_bb->getContext();
-  auto current_function = current_bb->getParent();
+  auto eval_buffer_size_bb = llvm::BasicBlock::Create(
+      context, "eval_" + parameter_name + "_buffer_size", current_function);
+
+  builder.CreateBr(eval_buffer_size_bb);
+  builder.SetInsertPoint(eval_buffer_size_bb);
 
   auto buffer_storage_entry_size =
       static_cast<std::uint32_t>(buffer_storage.bufferSize());
@@ -2207,6 +2286,7 @@ SuccessOrStringError FunctionTracer::captureBuffer(
                        capture_buffer_bb);
 
   builder.SetInsertPoint(invalid_buffer_size_bb);
+
   auto max_buffer_size = builder.getInt32(buffer_storage_entry_size);
   builder.CreateBr(capture_buffer_bb);
 
@@ -2214,11 +2294,9 @@ SuccessOrStringError FunctionTracer::captureBuffer(
 
   auto buffer_size_phi = builder.CreatePHI(builder.getInt32Ty(), 2);
   buffer_size_phi->addIncoming(max_buffer_size, invalid_buffer_size_bb);
-  buffer_size_phi->addIncoming(buffer_size, current_bb);
+  buffer_size_phi->addIncoming(buffer_size, eval_buffer_size_bb);
 
   // Read the buffer
-  auto buffer_address = builder.CreateLoad(event_data_field);
-
   auto read_error = bpf_syscall_interface.probeRead(
       buffer_storage_entry, buffer_size_phi, buffer_address);
 
@@ -2237,6 +2315,9 @@ SuccessOrStringError FunctionTracer::captureBuffer(
 
   builder.CreateStore(tagged_buffer_storage_index, event_data_field);
 
+  builder.CreateBr(skip_buffer_read_bb);
+  builder.SetInsertPoint(skip_buffer_read_bb);
+
   return {};
 }
 
@@ -2248,9 +2329,25 @@ SuccessOrStringError FunctionTracer::captureArgv(
     const std::string &parameter_name, llvm::Value *probe_error_flag,
     std::size_t argv_size) {
 
+  // Skip the read if the pointer is set to nullptr
+  auto argv_address = builder.CreateLoad(event_data_field);
+
   auto current_bb = builder.GetInsertBlock();
   auto &context = current_bb->getContext();
   auto current_function = current_bb->getParent();
+
+  auto argv_address_cond =
+      builder.CreateICmpEQ(builder.getInt64(0U), argv_address);
+
+  auto skip_argv_read_bb = llvm::BasicBlock::Create(
+      context, "skip_" + parameter_name + "_argv_read", current_function);
+
+  auto read_argv_bb = llvm::BasicBlock::Create(
+      context, "read_" + parameter_name + "_argv", current_function);
+
+  builder.CreateCondBr(argv_address_cond, skip_argv_read_bb, read_argv_bb);
+
+  builder.SetInsertPoint(read_argv_bb);
 
   //
   // In order to capture this, we'll reserve a page in the buffer storage
@@ -2287,8 +2384,6 @@ SuccessOrStringError FunctionTracer::captureArgv(
   // Go through each argv entry
   auto end_argv_capture_bb = llvm::BasicBlock::Create(
       context, parameter_name + "_capture_end", current_function);
-
-  auto argv_address = builder.CreateLoad(event_data_field);
 
   for (auto argv_index = 0U; argv_index < argv_size; ++argv_index) {
     // Get the pointer to the current argv entry
@@ -2371,6 +2466,9 @@ SuccessOrStringError FunctionTracer::captureArgv(
       bpf_syscall_interface, builder, buffer_storage_index);
 
   builder.CreateStore(tagged_pointer_buffer_index, event_data_field);
+
+  builder.CreateBr(skip_argv_read_bb);
+  builder.SetInsertPoint(skip_argv_read_bb);
 
   return {};
 }
