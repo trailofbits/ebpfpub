@@ -15,6 +15,10 @@
 
 #include <fcntl.h>
 
+#ifndef MAX_HANDLE_SZ
+#define MAX_HANDLE_SZ 128
+#endif
+
 namespace tob::ebpfpub {
 namespace {
 using ParameterListMap =
@@ -302,6 +306,188 @@ void initializeParameterListForNameToHandleAt(
   param_list_map.insert({"name_to_handle_at", std::move(parameter_list)});
 }
 
+void initializeParameterListForCreat(ParameterListMap &param_list_map) {
+  // clang-format off
+  tob::ebpfpub::IFunctionTracer::ParameterList parameter_list = {
+    {
+      "pathname",
+      tob::ebpfpub::IFunctionTracer::Parameter::Type::String,
+      tob::ebpfpub::IFunctionTracer::Parameter::Mode::In,
+      {}
+    },
+
+    {
+      "mode",
+      tob::ebpfpub::IFunctionTracer::Parameter::Type::Integer,
+      tob::ebpfpub::IFunctionTracer::Parameter::Mode::In,
+      8U
+    }
+  };
+  // clang-format on
+
+  param_list_map.insert({"name_to_handle_at", std::move(parameter_list)});
+}
+
+void initializeParameterListForMknod(ParameterListMap &param_list_map) {
+  // clang-format off
+  tob::ebpfpub::IFunctionTracer::ParameterList parameter_list = {
+    {
+      "filename",
+      tob::ebpfpub::IFunctionTracer::Parameter::Type::String,
+      tob::ebpfpub::IFunctionTracer::Parameter::Mode::In,
+      {}
+    },
+
+    {
+      "mode",
+      tob::ebpfpub::IFunctionTracer::Parameter::Type::Integer,
+      tob::ebpfpub::IFunctionTracer::Parameter::Mode::In,
+      8U
+    },
+
+    {
+      "dev",
+      tob::ebpfpub::IFunctionTracer::Parameter::Type::Integer,
+      tob::ebpfpub::IFunctionTracer::Parameter::Mode::In,
+      8U
+    }
+  };
+  // clang-format on
+
+  param_list_map.insert({"name_to_handle_at", std::move(parameter_list)});
+}
+
+void initializeParameterListForMknodAt(ParameterListMap &param_list_map) {
+  // clang-format off
+  tob::ebpfpub::IFunctionTracer::ParameterList parameter_list = {
+    {
+      "dfd",
+      tob::ebpfpub::IFunctionTracer::Parameter::Type::Integer,
+      tob::ebpfpub::IFunctionTracer::Parameter::Mode::In,
+      8U
+    },
+
+    {
+      "filename",
+      tob::ebpfpub::IFunctionTracer::Parameter::Type::String,
+      tob::ebpfpub::IFunctionTracer::Parameter::Mode::In,
+      {}
+    },
+
+    {
+      "mode",
+      tob::ebpfpub::IFunctionTracer::Parameter::Type::Integer,
+      tob::ebpfpub::IFunctionTracer::Parameter::Mode::In,
+      8U
+    },
+
+    {
+      "dev",
+      tob::ebpfpub::IFunctionTracer::Parameter::Type::Integer,
+      tob::ebpfpub::IFunctionTracer::Parameter::Mode::In,
+      8U
+    }
+  };
+  // clang-format on
+
+  param_list_map.insert({"name_to_handle_at", std::move(parameter_list)});
+}
+
+void initializeParameterListForOpen(ParameterListMap &param_list_map) {
+  // clang-format off
+  tob::ebpfpub::IFunctionTracer::ParameterList parameter_list = {
+    {
+      "filename",
+      tob::ebpfpub::IFunctionTracer::Parameter::Type::String,
+      tob::ebpfpub::IFunctionTracer::Parameter::Mode::In,
+      {}
+    },
+
+    {
+      "flags",
+      tob::ebpfpub::IFunctionTracer::Parameter::Type::Integer,
+      tob::ebpfpub::IFunctionTracer::Parameter::Mode::In,
+      8U
+    },
+
+    {
+      "mode",
+      tob::ebpfpub::IFunctionTracer::Parameter::Type::Integer,
+      tob::ebpfpub::IFunctionTracer::Parameter::Mode::In,
+      8U
+    }
+  };
+  // clang-format on
+
+  param_list_map.insert({"open", std::move(parameter_list)});
+}
+
+void initializeParameterListForOpenAt(ParameterListMap &param_list_map) {
+  // clang-format off
+  tob::ebpfpub::IFunctionTracer::ParameterList parameter_list = {
+    {
+      "dfd",
+      tob::ebpfpub::IFunctionTracer::Parameter::Type::Integer,
+      tob::ebpfpub::IFunctionTracer::Parameter::Mode::In,
+      8U
+    },
+
+    {
+      "filename",
+      tob::ebpfpub::IFunctionTracer::Parameter::Type::String,
+      tob::ebpfpub::IFunctionTracer::Parameter::Mode::In,
+      {}
+    },
+
+    {
+      "flags",
+      tob::ebpfpub::IFunctionTracer::Parameter::Type::Integer,
+      tob::ebpfpub::IFunctionTracer::Parameter::Mode::In,
+      8U
+    },
+
+    {
+      "mode",
+      tob::ebpfpub::IFunctionTracer::Parameter::Type::Integer,
+      tob::ebpfpub::IFunctionTracer::Parameter::Mode::In,
+      8U
+    }
+  };
+  // clang-format on
+
+  param_list_map.insert({"openat", std::move(parameter_list)});
+}
+
+void initializeParameterListForOpenByHandleAt(
+    ParameterListMap &param_list_map) {
+  // clang-format off
+  tob::ebpfpub::IFunctionTracer::ParameterList parameter_list = {
+    {
+      "mountdirfd",
+      tob::ebpfpub::IFunctionTracer::Parameter::Type::Integer,
+      tob::ebpfpub::IFunctionTracer::Parameter::Mode::In,
+      8U
+    },
+
+    {
+      "handle",
+      tob::ebpfpub::IFunctionTracer::Parameter::Type::Buffer,
+      tob::ebpfpub::IFunctionTracer::Parameter::Mode::In,
+      static_cast<std::size_t>(MAX_HANDLE_SZ)
+    },
+
+    {
+      "flags",
+      tob::ebpfpub::IFunctionTracer::Parameter::Type::Integer,
+      tob::ebpfpub::IFunctionTracer::Parameter::Mode::In,
+      8U
+    }
+  };
+  // clang-format on
+
+  param_list_map.insert({"open_by_handle_at", std::move(parameter_list)});
+}
+
 void initializeParameterListMap(ParameterListMap &param_list_map) {
   initializeParameterListForConnect(param_list_map);
   initializeParameterListForAccept(param_list_map);
@@ -311,6 +497,12 @@ void initializeParameterListMap(ParameterListMap &param_list_map) {
   initializeParameterListForExecve(param_list_map);
   initializeParameterListForExecveAt(param_list_map);
   initializeParameterListForNameToHandleAt(param_list_map);
+  initializeParameterListForCreat(param_list_map);
+  initializeParameterListForMknod(param_list_map);
+  initializeParameterListForMknodAt(param_list_map);
+  initializeParameterListForOpen(param_list_map);
+  initializeParameterListForOpenAt(param_list_map);
+  initializeParameterListForOpenByHandleAt(param_list_map);
 }
 } // namespace
 
