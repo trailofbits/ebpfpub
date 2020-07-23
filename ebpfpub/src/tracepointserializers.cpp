@@ -13,6 +13,8 @@
 
 #include <tob/ebpf/tracepointdescriptor.h>
 
+#include <fcntl.h>
+
 namespace tob::ebpfpub {
 namespace {
 using ParameterListMap =
@@ -141,9 +143,47 @@ void initializeParameterListForBind(ParameterListMap &param_list_map) {
   param_list_map.insert({"bind", std::move(parameter_list)});
 }
 
-void initializeParameterListForForkAndVfork(ParameterListMap &param_list_map) {
-  param_list_map.insert({"fork", {}});
-  param_list_map.insert({"vfork", {}});
+void initializeParameterListForClone(ParameterListMap &param_list_map) {
+  // clang-format off
+  tob::ebpfpub::IFunctionTracer::ParameterList parameter_list = {
+    {
+      "flags",
+      tob::ebpfpub::IFunctionTracer::Parameter::Type::Integer,
+      tob::ebpfpub::IFunctionTracer::Parameter::Mode::In,
+      8U
+    },
+
+    {
+      "stack",
+      tob::ebpfpub::IFunctionTracer::Parameter::Type::Integer,
+      tob::ebpfpub::IFunctionTracer::Parameter::Mode::In,
+      8U
+    },
+
+    {
+      "parent_tid",
+      tob::ebpfpub::IFunctionTracer::Parameter::Type::IntegerPtr,
+      tob::ebpfpub::IFunctionTracer::Parameter::Mode::Out,
+      8U
+    },
+
+    {
+      "child_tid",
+      tob::ebpfpub::IFunctionTracer::Parameter::Type::IntegerPtr,
+      tob::ebpfpub::IFunctionTracer::Parameter::Mode::Out,
+      8U
+    },
+
+    {
+      "tls",
+      tob::ebpfpub::IFunctionTracer::Parameter::Type::Integer,
+      tob::ebpfpub::IFunctionTracer::Parameter::Mode::In,
+      8U
+    }
+  };
+  // clang-format on
+
+  param_list_map.insert({"clone", std::move(parameter_list)});
 }
 
 void initializeParameterListForExecve(ParameterListMap &param_list_map) {
@@ -218,14 +258,59 @@ void initializeParameterListForExecveAt(ParameterListMap &param_list_map) {
   param_list_map.insert({"execveat", std::move(parameter_list)});
 }
 
+void initializeParameterListForNameToHandleAt(
+    ParameterListMap &param_list_map) {
+  // clang-format off
+  tob::ebpfpub::IFunctionTracer::ParameterList parameter_list = {
+    {
+      "dfd",
+      tob::ebpfpub::IFunctionTracer::Parameter::Type::Integer,
+      tob::ebpfpub::IFunctionTracer::Parameter::Mode::In,
+      8U
+    },
+
+    {
+      "name",
+      tob::ebpfpub::IFunctionTracer::Parameter::Type::String,
+      tob::ebpfpub::IFunctionTracer::Parameter::Mode::In,
+      {}
+    },
+
+    {
+      "handle",
+      tob::ebpfpub::IFunctionTracer::Parameter::Type::Buffer,
+      tob::ebpfpub::IFunctionTracer::Parameter::Mode::In,
+      static_cast<std::size_t>(MAX_HANDLE_SZ)
+    },
+
+    {
+      "mnt_id",
+      tob::ebpfpub::IFunctionTracer::Parameter::Type::IntegerPtr,
+      tob::ebpfpub::IFunctionTracer::Parameter::Mode::Out,
+      8U
+    },
+
+    {
+      "flag",
+      tob::ebpfpub::IFunctionTracer::Parameter::Type::Integer,
+      tob::ebpfpub::IFunctionTracer::Parameter::Mode::In,
+      8U
+    }
+  };
+  // clang-format on
+
+  param_list_map.insert({"name_to_handle_at", std::move(parameter_list)});
+}
+
 void initializeParameterListMap(ParameterListMap &param_list_map) {
   initializeParameterListForConnect(param_list_map);
   initializeParameterListForAccept(param_list_map);
   initializeParameterListForAccept4(param_list_map);
   initializeParameterListForBind(param_list_map);
-  initializeParameterListForForkAndVfork(param_list_map);
+  initializeParameterListForClone(param_list_map);
   initializeParameterListForExecve(param_list_map);
   initializeParameterListForExecveAt(param_list_map);
+  initializeParameterListForNameToHandleAt(param_list_map);
 }
 } // namespace
 
