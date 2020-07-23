@@ -204,7 +204,7 @@ void initializeParameterListForExecve(ParameterListMap &param_list_map) {
       "argv",
       tob::ebpfpub::IFunctionTracer::Parameter::Type::Argv,
       tob::ebpfpub::IFunctionTracer::Parameter::Mode::In,
-      20U
+      25U
     },
 
     {
@@ -240,7 +240,7 @@ void initializeParameterListForExecveAt(ParameterListMap &param_list_map) {
       "argv",
       tob::ebpfpub::IFunctionTracer::Parameter::Type::Argv,
       tob::ebpfpub::IFunctionTracer::Parameter::Mode::In,
-      20U
+      25U
     },
 
     {
@@ -458,6 +458,42 @@ void initializeParameterListForOpenAt(ParameterListMap &param_list_map) {
   param_list_map.insert({"openat", std::move(parameter_list)});
 }
 
+void initializeParameterListForOpenAt2(ParameterListMap &param_list_map) {
+  // clang-format off
+  tob::ebpfpub::IFunctionTracer::ParameterList parameter_list = {
+    {
+      "dfd",
+      tob::ebpfpub::IFunctionTracer::Parameter::Type::Integer,
+      tob::ebpfpub::IFunctionTracer::Parameter::Mode::In,
+      8U
+    },
+
+    {
+      "filename",
+      tob::ebpfpub::IFunctionTracer::Parameter::Type::String,
+      tob::ebpfpub::IFunctionTracer::Parameter::Mode::In,
+      {}
+    },
+
+    {
+      "how",
+      tob::ebpfpub::IFunctionTracer::Parameter::Type::Buffer,
+      tob::ebpfpub::IFunctionTracer::Parameter::Mode::In,
+      "usize"
+    },
+
+    {
+      "usize",
+      tob::ebpfpub::IFunctionTracer::Parameter::Type::Integer,
+      tob::ebpfpub::IFunctionTracer::Parameter::Mode::In,
+      8U
+    }
+  };
+  // clang-format on
+
+  param_list_map.insert({"openat2", std::move(parameter_list)});
+}
+
 void initializeParameterListForOpenByHandleAt(
     ParameterListMap &param_list_map) {
   // clang-format off
@@ -502,6 +538,7 @@ void initializeParameterListMap(ParameterListMap &param_list_map) {
   initializeParameterListForMknodAt(param_list_map);
   initializeParameterListForOpen(param_list_map);
   initializeParameterListForOpenAt(param_list_map);
+  initializeParameterListForOpenAt2(param_list_map);
   initializeParameterListForOpenByHandleAt(param_list_map);
 }
 } // namespace
