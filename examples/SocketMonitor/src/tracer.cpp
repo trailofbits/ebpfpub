@@ -207,8 +207,8 @@ Tracer::Tracer() : d(new PrivateData) {
 
   d->perf_event_array = perf_event_array_exp.takeValue();
 
-  auto perf_event_reader_exp = tob::ebpfpub::IPerfEventReader::create(
-      *d->perf_event_array.get(), *d->buffer_storage.get());
+  auto perf_event_reader_exp =
+      tob::ebpfpub::IPerfEventReader::create(*d->perf_event_array.get());
 
   if (!perf_event_reader_exp.succeeded()) {
     throw std::runtime_error("Failed to create the perf event reader: " +

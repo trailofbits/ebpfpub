@@ -13,7 +13,6 @@
 #include <functional>
 #include <memory>
 
-#include <ebpfpub/ibufferstorage.h>
 #include <ebpfpub/ifunctiontracer.h>
 
 #include <tob/ebpf/perfeventarray.h>
@@ -32,8 +31,7 @@ public:
   using Callback = std::function<void(const IFunctionTracer::EventList &,
                                       const ErrorCounters &)>;
 
-  static StringErrorOr<Ref> create(ebpf::PerfEventArray &perf_event_array,
-                                   IBufferStorage &buffer_storage);
+  static StringErrorOr<Ref> create(ebpf::PerfEventArray &perf_event_array);
 
   IPerfEventReader() = default;
   virtual ~IPerfEventReader() = default;
