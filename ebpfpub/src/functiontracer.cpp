@@ -783,6 +783,10 @@ SuccessOrStringError
 FunctionTracer::createEventDataType(llvm::Module &module,
                                     const ParameterList &valid_param_list) {
 
+  if (valid_param_list.empty()) {
+    return {};
+  }
+
   auto &context = module.getContext();
 
   std::vector<llvm::Type *> type_list;
@@ -832,12 +836,12 @@ SuccessOrStringError FunctionTracer::createEventType(llvm::Module &module) {
     return StringError::create("The event header type is not defined");
   }
 
-  auto event_data_type = module.getTypeByName(kEventDataTypeName);
-  if (event_data_type == nullptr) {
-    return StringError::create("The event data type is not defined");
-  }
+  std::vector<llvm::Type *> type_list = {event_header_type};
 
-  std::vector<llvm::Type *> type_list = {event_header_type, event_data_type};
+  auto event_data_type = module.getTypeByName(kEventDataTypeName);
+  if (event_data_type != nullptr) {
+    type_list.push_back(event_data_type);
+  }
 
   auto event_type = llvm::StructType::create(type_list, kEventTypeName, true);
 
@@ -1341,6 +1345,10 @@ SuccessOrStringError FunctionTracer::generateEnterEventData(
     const StackAllocationList &allocation_list,
     const VariableList &variable_list) {
 
+  if (valid_param_list.empty()) {
+    return {};
+  }
+
   // Get the event data from the event object
   auto event_data = builder.CreateGEP(
       event_object, {builder.getInt32(0), builder.getInt32(1)});
@@ -1699,6 +1707,10 @@ SuccessOrStringError FunctionTracer::generateExitEventData(
     const ParameterListIndex &param_list_index, IBufferStorage &buffer_storage,
     const StackAllocationList &allocation_list,
     const VariableList &variable_list) {
+
+  if (valid_param_list.empty()) {
+    return {};
+  }
 
   // Get the event data from the event object
   auto event_data = builder.CreateGEP(

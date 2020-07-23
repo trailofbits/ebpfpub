@@ -168,7 +168,6 @@ int main(int argc, char *argv[]) {
     perf_event_reader->insert(std::move(function_tracer));
   }
 
-  // Main event loop
   while (true) {
     perf_event_reader->exec(std::chrono::seconds(1U), eventParser);
   }
