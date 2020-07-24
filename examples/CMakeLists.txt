@@ -12,7 +12,7 @@ function(ebpfpubExamples)
   if(EBPFPUB_BUILD_EXAMPLES)
     message(STATUS "ebpfpub - Examples are being built")
 
-    add_subdirectory("sample1")
+    add_subdirectory("socketevents")
     add_subdirectory("execsnoop")
   endif()
 

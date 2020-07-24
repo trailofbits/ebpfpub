@@ -2118,7 +2118,14 @@ StringErrorOr<FunctionTracer::EventList> FunctionTracer::parseEventData(
           return StringError::create("Invalid parameter type");
         }
 
-        event.field_list.push_back(std::move(event_field));
+        IFunctionTracer::Event::FieldMap *field_map = nullptr;
+        if (event_field.in) {
+          field_map = &event.in_field_map;
+        } else {
+          field_map = &event.out_field_map;
+        }
+
+        field_map->insert({event_field.name, std::move(event_field)});
       }
     }
 

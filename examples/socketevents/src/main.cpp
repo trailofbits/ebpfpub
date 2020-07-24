@@ -8,6 +8,7 @@
 
 #include <iomanip>
 #include <iostream>
+#include <sstream>
 
 #include <ebpfpub/ibufferstorage.h>
 #include <ebpfpub/ifunctiontracer.h>
@@ -18,6 +19,14 @@
 #include <netinet/in.h>
 #include <sys/resource.h>
 
+const std::vector<std::string> kSyscallNameList = {"connect", "bind", "accept",
+                                                   "accept4"};
+
+std::uint64_t connect_event_id{0U};
+std::uint64_t bind_event_id{0U};
+std::uint64_t accept_event_id{0U};
+std::uint64_t accept4_event_id{0U};
+
 void setRlimit() {
   struct rlimit rl = {};
   rl.rlim_max = RLIM_INFINITY;
@@ -27,6 +36,75 @@ void setRlimit() {
   if (error != 0) {
     throw std::runtime_error("Failed to set RLIMIT_MEMLOCK");
   }
+}
+
+std::string parseSockaddrStructure(
+    const tob::ebpfpub::IFunctionTracer::Event::Field::Buffer &buffer) {
+
+  sa_family_t sa_family{0U};
+  std::memcpy(&sa_family, buffer.data(), sizeof(sa_family));
+
+  if (sa_family == AF_UNSPEC) {
+    // A more correct approach is to trace socket() and look
+    // at the fd
+    sa_family = AF_INET;
+  }
+
+  std::stringstream output;
+
+  if (sa_family == AF_INET) {
+    struct sockaddr_in address_structure = {};
+    std::memcpy(&address_structure, buffer.data(), sizeof(address_structure));
+
+    std::uint8_t address_parts[4U] = {};
+    std::memcpy(address_parts, &address_structure.sin_addr.s_addr,
+                sizeof(address_parts));
+
+    output << static_cast<int>(address_parts[0]) << "."
+           << static_cast<int>(address_parts[1]) << "."
+           << static_cast<int>(address_parts[2]) << "."
+           << static_cast<int>(address_parts[3]);
+
+    output << ":" << htons(address_structure.sin_port);
+
+  } else {
+    output << "<unsupported_sa_family:" << sa_family << ">";
+  }
+
+  return output.str();
+}
+
+void processConnectEvent(const tob::ebpfpub::IFunctionTracer::Event &event) {
+
+  const auto &uservaddr =
+      std::get<tob::ebpfpub::IFunctionTracer::Event::Field::Buffer>(
+          event.in_field_map.at("uservaddr").data_var);
+
+  auto address = parseSockaddrStructure(uservaddr);
+
+  std::cout << "  connect(" << address << ")\n\n";
+}
+
+void processAcceptEvent(const tob::ebpfpub::IFunctionTracer::Event &event) {
+
+  const auto &upeer_sockaddr =
+      std::get<tob::ebpfpub::IFunctionTracer::Event::Field::Buffer>(
+          event.in_field_map.at("upeer_sockaddr").data_var);
+
+  auto address = parseSockaddrStructure(upeer_sockaddr);
+
+  std::cout << "  accept(" << address << ")\n\n";
+}
+
+void processBindEvent(const tob::ebpfpub::IFunctionTracer::Event &event) {
+
+  const auto &umyaddr =
+      std::get<tob::ebpfpub::IFunctionTracer::Event::Field::Buffer>(
+          event.in_field_map.at("umyaddr").data_var);
+
+  auto address = parseSockaddrStructure(umyaddr);
+
+  std::cout << "  bind(" << address << ")\n\n";
 }
 
 void eventParser(
@@ -73,38 +151,25 @@ void eventParser(
               << "exit_code: " << event.header.exit_code << " "
               << "probe_error: " << event.header.probe_error << "\n";
 
-    std::cout << "  " << event.name << "(";
+    if (event.identifier == connect_event_id) {
+      processConnectEvent(event);
 
-    const auto &filename =
-        std::get<std::string>(event.in_field_map.at("filename").data_var);
+    } else if (event.identifier == accept_event_id ||
+               event.identifier == accept4_event_id) {
+      processAcceptEvent(event);
 
-    std::cout << "filename: " << filename << ", ";
-
-    const auto &argument_list =
-        std::get<tob::ebpfpub::IFunctionTracer::Event::Field::Argv>(
-            event.in_field_map.at("argv").data_var);
-
-    std::cout << "argv: { ";
-
-    for (auto argument_it = argument_list.begin();
-         argument_it != argument_list.end(); ++argument_it) {
-
-      const auto &argument = *argument_it;
-      std::cout << argument;
-
-      if (std::next(argument_it, 1) < argument_list.end()) {
-        std::cout << ", ";
-      }
+    } else if (event.identifier == bind_event_id) {
+      processBindEvent(event);
+    } else {
+      std::cout << "WTF: " << event.name << std::endl;
     }
-
-    std::cout << " })\n\n";
   }
 }
 
 int main(int argc, char *argv[]) {
   setRlimit();
 
-  auto buffer_storage_exp = tob::ebpfpub::IBufferStorage::create(1024, 4096);
+  auto buffer_storage_exp = tob::ebpfpub::IBufferStorage::create(1024, 1024);
   if (!buffer_storage_exp.succeeded()) {
     throw std::runtime_error("Failed to create the buffer storage: " +
                              buffer_storage_exp.error().message());
@@ -130,8 +195,6 @@ int main(int argc, char *argv[]) {
 
   auto perf_event_reader = perf_event_reader_exp.takeValue();
 
-  const std::vector<std::string> kSyscallNameList = {"execve", "execveat"};
-
   for (const auto &syscall_name : kSyscallNameList) {
     auto function_tracer_exp =
         tob::ebpfpub::IFunctionTracer::createFromSyscallTracepoint(
@@ -143,6 +206,20 @@ int main(int argc, char *argv[]) {
     }
 
     auto function_tracer = function_tracer_exp.takeValue();
+
+    if (syscall_name == "connect") {
+      connect_event_id = function_tracer->eventIdentifier();
+
+    } else if (syscall_name == "bind") {
+      bind_event_id = function_tracer->eventIdentifier();
+
+    } else if (syscall_name == "accept") {
+      accept_event_id = function_tracer->eventIdentifier();
+
+    } else if (syscall_name == "accept4") {
+      accept4_event_id = function_tracer->eventIdentifier();
+    }
+
     perf_event_reader->insert(std::move(function_tracer));
   }
 

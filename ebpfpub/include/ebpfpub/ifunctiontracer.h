@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <unordered_map>
 #include <variant>
 #include <vector>
 
@@ -55,13 +56,15 @@ public:
       std::variant<std::uint64_t, Buffer, std::string, Argv> data_var;
     };
 
-    using FieldList = std::vector<Field>;
+    using FieldMap = std::unordered_map<std::string, Field>;
 
     std::uint64_t identifier{0U};
     std::string name;
 
     Header header;
-    FieldList field_list;
+
+    FieldMap in_field_map;
+    FieldMap out_field_map;
   };
 
   using EventList = std::vector<Event>;
