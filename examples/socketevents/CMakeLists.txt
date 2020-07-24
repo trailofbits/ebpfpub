@@ -7,9 +7,9 @@
 #
 
 cmake_minimum_required(VERSION 3.14.6)
-project("sample1")
+project("socketevents")
 
-function(ebpfpubExamplesSample1)
+function(ebpfpubExamplesSocketEvents)
   add_executable("${PROJECT_NAME}"
     src/main.cpp
   )
@@ -19,4 +19,4 @@ function(ebpfpubExamplesSample1)
   )
 endfunction()
 
-ebpfpubExamplesSample1()
+ebpfpubExamplesSocketEvents()

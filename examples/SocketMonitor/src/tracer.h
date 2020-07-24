@@ -27,4 +27,17 @@ private:
   std::unique_ptr<PrivateData> d;
 
   void eventThread();
+
+  void processExecEvent(const tob::ebpfpub::IFunctionTracer::Event &event);
+
+  std::string getProcessFilename(pid_t process_id) const;
+
+  void processConnectEvent(Model::Row &row,
+                           const tob::ebpfpub::IFunctionTracer::Event &event);
+
+  void processBindEvent(Model::Row &row,
+                        const tob::ebpfpub::IFunctionTracer::Event &event);
+
+  void processAcceptEvent(Model::Row &row,
+                          const tob::ebpfpub::IFunctionTracer::Event &event);
 };

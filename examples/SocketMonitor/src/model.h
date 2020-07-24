@@ -12,6 +12,8 @@
 
 #include <QAbstractTableModel>
 
+#include <ebpfpub/ifunctiontracer.h>
+
 class Model final : public QAbstractTableModel {
   Q_OBJECT
 

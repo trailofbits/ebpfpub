@@ -14,7 +14,6 @@
 #include <unordered_map>
 
 #include <ebpfpub/ibufferstorage.h>
-#include <ebpfpub/ifunctiontracer.h>
 #include <ebpfpub/iperfeventreader.h>
 
 #include <tob/ebpf/perfeventarray.h>
@@ -31,7 +30,7 @@ const std::vector<std::string> kSyscallNameList = {
     "accept4",
 };
 
-// Custom parameter lists that only dumps the filename string and uses
+// Custom parameter lists that only dump the filename string and uses
 // integers for everything else
 
 // clang-format off
@@ -98,6 +97,18 @@ tob::ebpfpub::IFunctionTracer::ParameterList kExecveatParameterList = {
 };
 // clang-format on
 
+void generateHeaderData(Model::Row &row,
+                        const tob::ebpfpub::IFunctionTracer::Event &event) {
+  row.timestamp = event.header.timestamp;
+  row.thread_id = event.header.thread_id;
+  row.process_id = event.header.process_id;
+  row.user_id = event.header.user_id;
+  row.group_id = event.header.group_id;
+  row.cgroup_id = event.header.cgroup_id;
+  row.exit_code = event.header.exit_code;
+  row.syscall_name = event.name;
+}
+
 void parseSockaddrStructure(
     std::string &address,
     const tob::ebpfpub::IFunctionTracer::Event::Field::Buffer &buffer) {
@@ -108,8 +119,9 @@ void parseSockaddrStructure(
   std::stringstream output;
 
   switch (sa_family) {
+  case AF_UNSPEC:
   case AF_INET: {
-    output << "AF_INET: ";
+    output << "AF_INET=";
 
     struct sockaddr_in temp = {};
     std::memcpy(&temp, buffer.data(), sizeof(temp));
@@ -127,7 +139,7 @@ void parseSockaddrStructure(
   }
 
   case AF_UNIX: {
-    output << "AF_UNIX: ";
+    output << "AF_UNIX=";
 
     struct sockaddr_un temp = {};
     std::memcpy(&temp, buffer.data(), sizeof(temp));
@@ -143,34 +155,6 @@ void parseSockaddrStructure(
 
   address = output.str();
 }
-
-void generateEventData(
-    std::string &event_data,
-    const tob::ebpfpub::IFunctionTracer::Event::FieldList &field_list) {
-
-  std::stringstream output;
-
-  for (const auto &field : field_list) {
-    if (std::holds_alternative<std::uint64_t>(field.data_var)) {
-      auto value = std::get<std::uint64_t>(field.data_var);
-      output << field.name << "=" << value << " ";
-
-    } else if (std::holds_alternative<
-                   tob::ebpfpub::IFunctionTracer::Event::Field::Buffer>(
-                   field.data_var)) {
-      const auto &buffer =
-          std::get<tob::ebpfpub::IFunctionTracer::Event::Field::Buffer>(
-              field.data_var);
-
-      std::string address;
-      parseSockaddrStructure(address, buffer);
-
-      output << field.name << "=" << address << " ";
-    }
-  }
-
-  event_data = output.str();
-}
 } // namespace
 
 struct Tracer::PrivateData final {
@@ -184,6 +168,10 @@ struct Tracer::PrivateData final {
   Model::RowList row_list;
   std::mutex row_list_mutex;
 
+  std::uint64_t connect_identifier{0U};
+  std::uint64_t bind_identifier{0U};
+  std::uint64_t accept_identifier{0U};
+  std::uint64_t accept4_identifier{0U};
   std::uint64_t execve_identifier{0U};
   std::uint64_t execveat_identifier{0U};
 
@@ -229,6 +217,20 @@ Tracer::Tracer() : d(new PrivateData) {
     }
 
     auto function_tracer = function_tracer_exp.takeValue();
+
+    if (syscall_name == "connect") {
+      d->connect_identifier = function_tracer->eventIdentifier();
+
+    } else if (syscall_name == "bind") {
+      d->bind_identifier = function_tracer->eventIdentifier();
+
+    } else if (syscall_name == "accept") {
+      d->accept_identifier = function_tracer->eventIdentifier();
+
+    } else if (syscall_name == "accept4") {
+      d->accept4_identifier = function_tracer->eventIdentifier();
+    }
+
     d->perf_event_reader->insert(std::move(function_tracer));
   }
 
@@ -287,60 +289,27 @@ void Tracer::eventThread() {
         std::chrono::seconds(1U),
 
         [&](const tob::ebpfpub::IFunctionTracer::EventList &event_list,
-            const tob::ebpfpub::IPerfEventReader::ErrorCounters
-                &error_counters) {
+            const tob::ebpfpub::IPerfEventReader::ErrorCounters &) {
           Model::RowList row_list;
 
           for (const auto &event : event_list) {
             if (event.identifier == d->execve_identifier ||
                 event.identifier == d->execveat_identifier) {
-              auto filename_field_it =
-                  std::find_if(event.field_list.begin(), event.field_list.end(),
-                               [](const auto &field) -> bool {
-                                 return field.name == "filename";
-                               });
-
-              Q_ASSERT(filename_field_it != event.field_list.end());
-
-              const auto &filename_field = *filename_field_it;
-
-              Q_ASSERT(
-                  std::holds_alternative<std::string>(filename_field.data_var));
-
-              const auto &filename =
-                  std::get<std::string>(filename_field.data_var);
-
-              d->process_id_map.insert({event.header.process_id, filename});
+              processExecEvent(event);
               continue;
             }
 
             Model::Row row{};
 
-            generateEventData(row.event_data, event.field_list);
+            if (event.identifier == d->connect_identifier) {
+              processConnectEvent(row, event);
 
-            row.timestamp = event.header.timestamp;
-            row.thread_id = event.header.thread_id;
-            row.process_id = event.header.process_id;
-            row.user_id = event.header.user_id;
-            row.group_id = event.header.group_id;
-            row.cgroup_id = event.header.cgroup_id;
-            row.exit_code = event.header.exit_code;
-            row.syscall_name = event.name;
+            } else if (event.identifier == d->bind_identifier) {
+              processBindEvent(row, event);
 
-            auto executable_path_it = d->process_id_map.find(row.process_id);
-            if (executable_path_it != d->process_id_map.end()) {
-              row.executable_path = executable_path_it->second;
-
-            } else {
-              auto link_path = std::string("/proc/") +
-                               std::to_string(row.process_id) + "/exe";
-
-              std::vector<char> buffer(SSIZE_MAX, 0);
-              if (readlink(link_path.c_str(), buffer.data(), buffer.size()) !=
-                  -1) {
-
-                row.executable_path = buffer.data();
-              }
+            } else if (event.identifier == d->accept_identifier ||
+                       event.identifier == d->accept4_identifier) {
+              processAcceptEvent(row, event);
             }
 
             row_list.push_back(std::move(row));
@@ -353,4 +322,112 @@ void Tracer::eventThread() {
                              std::make_move_iterator(row_list.end()));
         });
   }
+}
+
+void Tracer::processExecEvent(
+    const tob::ebpfpub::IFunctionTracer::Event &event) {
+  const auto &filename =
+      std::get<std::string>(event.in_field_map.at("filename").data_var);
+
+  d->process_id_map.insert({event.header.process_id, filename});
+}
+
+std::string Tracer::getProcessFilename(pid_t process_id) const {
+  auto filename_it = d->process_id_map.find(process_id);
+  if (filename_it != d->process_id_map.end()) {
+    return filename_it->second;
+  }
+
+  auto link_path = std::string("/proc/") + std::to_string(process_id) + "/exe";
+
+  std::vector<char> buffer(SSIZE_MAX, 0);
+  if (readlink(link_path.c_str(), buffer.data(), buffer.size() - 1) != -1) {
+    return buffer.data();
+  }
+
+  return std::string();
+}
+
+void Tracer::processConnectEvent(
+    Model::Row &row, const tob::ebpfpub::IFunctionTracer::Event &event) {
+
+  row = {};
+  generateHeaderData(row, event);
+
+  row.executable_path = getProcessFilename(event.header.process_id);
+
+  auto fd = std::get<std::uint64_t>(event.in_field_map.at("fd").data_var);
+
+  const auto &uservaddr =
+      std::get<tob::ebpfpub::IFunctionTracer::Event::Field::Buffer>(
+          event.in_field_map.at("uservaddr").data_var);
+
+  auto addrlen =
+      std::get<std::uint64_t>(event.in_field_map.at("addrlen").data_var);
+
+  std::string address;
+  parseSockaddrStructure(address, uservaddr);
+
+  std::stringstream output;
+  output << "uservaddr: " << address << "fd:" << fd << " "
+         << "addrlen: " << addrlen;
+
+  row.event_data = output.str();
+}
+
+void Tracer::processBindEvent(
+    Model::Row &row, const tob::ebpfpub::IFunctionTracer::Event &event) {
+
+  row = {};
+  generateHeaderData(row, event);
+
+  row.executable_path = getProcessFilename(event.header.process_id);
+
+  auto fd = std::get<std::uint64_t>(event.in_field_map.at("fd").data_var);
+  const auto &umyaddr =
+      std::get<tob::ebpfpub::IFunctionTracer::Event::Field::Buffer>(
+          event.in_field_map.at("umyaddr").data_var);
+  auto addrlen =
+      std::get<std::uint64_t>(event.in_field_map.at("addrlen").data_var);
+
+  std::string address;
+  parseSockaddrStructure(address, umyaddr);
+
+  std::stringstream output;
+  output << "umyaddr: " << address << "fd:" << fd << " "
+         << "addrlen: " << addrlen;
+
+  row.event_data = output.str();
+}
+
+void Tracer::processAcceptEvent(
+    Model::Row &row, const tob::ebpfpub::IFunctionTracer::Event &event) {
+
+  row = {};
+  generateHeaderData(row, event);
+
+  row.executable_path = getProcessFilename(event.header.process_id);
+
+  auto fd = std::get<std::uint64_t>(event.in_field_map.at("fd").data_var);
+  const auto &upeer_sockaddr =
+      std::get<tob::ebpfpub::IFunctionTracer::Event::Field::Buffer>(
+          event.out_field_map.at("upeer_sockaddr").data_var);
+  auto upeer_addrlen =
+      std::get<std::uint64_t>(event.out_field_map.at("upeer_addrlen").data_var);
+
+  std::string address;
+  parseSockaddrStructure(address, upeer_sockaddr);
+
+  std::stringstream output;
+  output << "upeer_sockaddr: " << address << "fd:" << fd << " "
+         << "upeer_addrlen: " << upeer_addrlen;
+
+  if (event.identifier == d->accept4_identifier) {
+    auto flags =
+        std::get<std::uint64_t>(event.in_field_map.at("flags").data_var);
+
+    output << "flags: " << flags;
+  }
+
+  row.event_data = output.str();
 }
