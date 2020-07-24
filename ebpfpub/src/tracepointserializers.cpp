@@ -151,28 +151,28 @@ void initializeParameterListForClone(ParameterListMap &param_list_map) {
   // clang-format off
   tob::ebpfpub::IFunctionTracer::ParameterList parameter_list = {
     {
-      "flags",
+      "clone_flags",
       tob::ebpfpub::IFunctionTracer::Parameter::Type::Integer,
       tob::ebpfpub::IFunctionTracer::Parameter::Mode::In,
       8U
     },
 
     {
-      "stack",
+      "newsp",
       tob::ebpfpub::IFunctionTracer::Parameter::Type::Integer,
       tob::ebpfpub::IFunctionTracer::Parameter::Mode::In,
       8U
     },
 
     {
-      "parent_tid",
+      "parent_tidptr",
       tob::ebpfpub::IFunctionTracer::Parameter::Type::IntegerPtr,
       tob::ebpfpub::IFunctionTracer::Parameter::Mode::Out,
       8U
     },
 
     {
-      "child_tid",
+      "child_tidptr",
       tob::ebpfpub::IFunctionTracer::Parameter::Type::IntegerPtr,
       tob::ebpfpub::IFunctionTracer::Parameter::Mode::Out,
       8U
