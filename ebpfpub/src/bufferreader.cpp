@@ -17,12 +17,12 @@ Type readType(const std::uint8_t *buffer, const std::size_t &buffer_size,
               std::size_t &bytes_read) {
 
   if (buffer == nullptr) {
-    throw std::runtime_error("Buffer is not initialized");
+    throw BufferReader::ReadError{0U, 0U};
   }
 
   Type output{};
   if (bytes_read + sizeof(output) > buffer_size) {
-    throw std::runtime_error("Not enough bytes");
+    throw BufferReader::ReadError{bytes_read, sizeof(output)};
   }
 
   std::memcpy(&output, buffer + bytes_read, sizeof(output));
