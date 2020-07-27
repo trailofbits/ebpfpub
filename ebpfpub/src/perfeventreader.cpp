@@ -10,7 +10,6 @@
 #include "bufferreader.h"
 #include "functiontracer.h"
 
-#include <iostream>
 #include <unordered_map>
 #include <vector>
 
@@ -100,7 +99,7 @@ SuccessOrStringError PerfEventReader::exec(const std::chrono::seconds &timeout,
       }
     }
 
-  } catch (const std::exception &e) {
+  } catch (const BufferReader::ReadError &) {
     ++error_counters.invalid_event_data;
     callback({}, error_counters);
   }

@@ -89,7 +89,7 @@ void processAcceptEvent(const tob::ebpfpub::IFunctionTracer::Event &event) {
 
   const auto &upeer_sockaddr =
       std::get<tob::ebpfpub::IFunctionTracer::Event::Field::Buffer>(
-          event.in_field_map.at("upeer_sockaddr").data_var);
+          event.out_field_map.at("upeer_sockaddr").data_var);
 
   auto address = parseSockaddrStructure(upeer_sockaddr);
 

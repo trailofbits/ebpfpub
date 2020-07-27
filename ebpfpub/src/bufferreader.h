@@ -17,6 +17,11 @@
 namespace tob::ebpfpub {
 class BufferReader final {
 public:
+  struct ReadError final {
+    std::size_t offset{0U};
+    std::size_t size{0U};
+  };
+
   using Ref = std::unique_ptr<BufferReader>;
   static StringErrorOr<Ref> create();
 

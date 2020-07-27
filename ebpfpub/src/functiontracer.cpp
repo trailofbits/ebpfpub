@@ -344,8 +344,8 @@ FunctionTracer::createParameterListIndex(
     [valid_param_list](const ParameterListIndexEntry &lhs,
                        const ParameterListIndexEntry &rhs) -> bool {
 
-      auto L_compareParameterModes = [](Parameter::Mode lhs,
-                                       Parameter::Mode rhs) -> bool {
+      auto L_compareParameterModes = [](Parameter::Mode l,
+                                       Parameter::Mode r) -> bool {
 
         // Do not depend on the order of declaration of the enum values
         auto L_parameterModeValue = [](Parameter::Mode mode) -> std::size_t {
@@ -358,14 +358,17 @@ FunctionTracer::createParameterListIndex(
 
           case Parameter::Mode::Out:
             return 2;
+
+          default:
+            throw std::logic_error("Invalid capture mode");
           }
         };
         
-        return L_parameterModeValue(lhs) < L_parameterModeValue(rhs);
+        return L_parameterModeValue(l) < L_parameterModeValue(r);
       };
 
-      auto L_compareParameterTypes = [](Parameter::Type lhs,
-                                        Parameter::Type rhs) -> bool {
+      auto L_compareParameterTypes = [](Parameter::Type l,
+                                        Parameter::Type r) -> bool {
 
         // Do not depend on the order of declaration of the enum values
         auto L_parameterTypeValue = [](Parameter::Type type) -> std::size_t {
@@ -384,16 +387,19 @@ FunctionTracer::createParameterListIndex(
 
           case Parameter::Type::Argv:
             return 4;
+
+          default:
+            throw std::logic_error("Invalid parameter type");
           }
         };
 
-        return L_parameterTypeValue(lhs) < L_parameterTypeValue(rhs);
+        return L_parameterTypeValue(l) < L_parameterTypeValue(r);
       };
 
-      auto L_compareOptSizeVariant = [](const Parameter::SizeVariant &lhs,
-                                        const Parameter::SizeVariant &rhs) -> bool {
+      auto L_compareOptSizeVariant = [](const Parameter::SizeVariant &l,
+                                        const Parameter::SizeVariant &) -> bool {
 
-        return std::holds_alternative<std::size_t>(lhs);
+        return std::holds_alternative<std::size_t>(l);
       };
 
       const auto &lhs_parameter = valid_param_list.at(lhs.param_index);
@@ -1897,23 +1903,50 @@ StringErrorOr<FunctionTracer::EventList> FunctionTracer::parseEventData(
     const ParameterListIndex &param_list_index,
     IBufferStorage &buffer_storage) {
 
+  // buffer_reader.skipBytes(buffer_reader.availableBytes());
+  // return FunctionTracer::EventList();
+
   EventList output;
+  bool first_event_object{true};
 
   for (;;) {
+    // If this is the first iteration, the event size/identifier must match
+    // what we need, since the PerfEventReader expects us to always parse
+    // at least one event
+
+    if (buffer_reader.availableBytes() == 0U) {
+      if (first_event_object) {
+        return StringError::create("Empty event buffer received");
+      }
+
+      break;
+    }
+
+    auto event_size = buffer_reader.peekU32(0U);
+    if (event_size != event_object_size) {
+      if (first_event_object) {
+        return StringError::create("Invalid event object size");
+      }
+
+      break;
+    }
+
+    auto event_id = buffer_reader.peekU64(4U);
+    if (event_id != event_object_identifier) {
+      if (first_event_object) {
+        return StringError::create("Invalid event object identifier");
+      }
+
+      break;
+    }
+
     if (buffer_reader.availableBytes() < event_object_size) {
       return StringError::create(
           "Not enough bytes to acquire a full event object");
     }
 
-    auto event_size = buffer_reader.u32();
-    if (event_size != event_object_size) {
-      return StringError::create("Invalid event object size");
-    }
-
-    auto event_id = buffer_reader.u64();
-    if (event_id != event_object_identifier) {
-      return StringError::create("Invalid event object identifier");
-    }
+    buffer_reader.skipBytes(12U);
+    first_event_object = false;
 
     // Get the event header
     Event event = {};
@@ -1937,20 +1970,20 @@ StringErrorOr<FunctionTracer::EventList> FunctionTracer::parseEventData(
 
     // Get the event data
     std::unordered_map<std::string, std::uint64_t> integer_parameter_map;
-    std::size_t event_data_fields_read = 0U;
+    std::size_t highest_offset_read = 0U;
 
     for (const auto &index_entry : param_list_index) {
       const auto &param = parameter_list.at(index_entry.param_index);
 
-      // Get the field data from the right offsets
+      // Get the field data from the right offsets; we can get either one
+      // or both the IN and OUT values
       std::vector<std::optional<std::uint64_t>> opt_field_value_list;
 
       if (index_entry.destination_index_in_opt.has_value()) {
         auto offset = index_entry.destination_index_in_opt.value() * 8U;
+        highest_offset_read = std::max(offset, highest_offset_read);
 
         auto value = buffer_reader.peekU64(offset);
-        ++event_data_fields_read;
-
         opt_field_value_list.push_back(value);
       } else {
         opt_field_value_list.push_back({});
@@ -1958,15 +1991,15 @@ StringErrorOr<FunctionTracer::EventList> FunctionTracer::parseEventData(
 
       if (index_entry.destination_index_out_opt.has_value()) {
         auto offset = index_entry.destination_index_out_opt.value() * 8U;
+        highest_offset_read = std::max(offset, highest_offset_read);
 
         auto value = buffer_reader.peekU64(offset);
-        ++event_data_fields_read;
-
         opt_field_value_list.push_back(value);
       } else {
         opt_field_value_list.push_back({});
       }
 
+      // Process the IN and OUT values we captured
       for (auto opt_field_value_it = opt_field_value_list.begin();
            opt_field_value_it != opt_field_value_list.end();
            ++opt_field_value_it) {
@@ -2129,15 +2162,8 @@ StringErrorOr<FunctionTracer::EventList> FunctionTracer::parseEventData(
       }
     }
 
-    buffer_reader.skipBytes(event_data_fields_read * sizeof(std::uint64_t));
+    buffer_reader.skipBytes(highest_offset_read + 8U);
     output.push_back(std::move(event));
-
-    if (buffer_reader.availableBytes() == 0U) {
-      break;
-    }
-
-    // TODO: keep parsing
-    break;
   }
 
   return output;
