@@ -31,6 +31,25 @@ const std::string kEnterFunctionParameterTypeName{"EnterFunctionParameters"};
 const std::string kExitFunctionParameterTypeName{"ExitFunctionParameters"};
 const std::string kEnterFunctionName{"onFunctionEnter"};
 const std::string kExitFunctionName{"onFunctionExit"};
+
+std::string
+stringFromBufferData(const FunctionTracer::Event::Field::Buffer &buffer) {
+  auto buffer_begin = buffer.data();
+  auto buffer_end = buffer.data() + buffer.size();
+
+  auto terminator = std::find(buffer_begin, buffer_end, 0x00);
+  if (terminator == buffer_end) {
+    terminator = buffer_end - 1;
+  }
+
+  auto string_size = static_cast<std::size_t>(terminator - buffer_begin);
+
+  std::string string_value;
+  string_value.resize(string_size);
+  std::memcpy(&string_value[0], buffer_begin, string_size);
+
+  return string_value;
+}
 } // namespace
 
 struct FunctionTracer::PrivateData final {
@@ -1903,9 +1922,6 @@ StringErrorOr<FunctionTracer::EventList> FunctionTracer::parseEventData(
     const ParameterListIndex &param_list_index,
     IBufferStorage &buffer_storage) {
 
-  // buffer_reader.skipBytes(buffer_reader.availableBytes());
-  // return FunctionTracer::EventList();
-
   EventList output;
   bool first_event_object{true};
 
@@ -2047,12 +2063,10 @@ StringErrorOr<FunctionTracer::EventList> FunctionTracer::parseEventData(
           integer_parameter_map.insert({name_prefix + param.name, value});
 
         } else if (param.type == Parameter::Type::String) {
-          std::vector<std::uint8_t> buffer;
+          Event::Field::Buffer buffer;
           auto map_error = buffer_storage.getBuffer(buffer, value);
           if (map_error.succeeded()) {
-            std::string string_value(buffer.size(), '\0');
-            std::memcpy(&string_value[0], buffer.data(), buffer.size());
-
+            auto string_value = stringFromBufferData(buffer);
             event_field.data_var = std::move(string_value);
 
           } else {
@@ -2121,14 +2135,11 @@ StringErrorOr<FunctionTracer::EventList> FunctionTracer::parseEventData(
                 break;
               }
 
-              Event::Field::Buffer str_buffer;
-              map_error = buffer_storage.getBuffer(str_buffer, buffer_index);
+              Event::Field::Buffer argv_entry;
+              map_error = buffer_storage.getBuffer(argv_entry, buffer_index);
               if (map_error.succeeded()) {
-                std::string argv_entry(str_buffer.size(), '\0');
-                std::memcpy(&argv_entry[0], str_buffer.data(),
-                            str_buffer.size());
-
-                argv_data.push_back(argv_entry);
+                auto string_value = stringFromBufferData(argv_entry);
+                argv_data.push_back(string_value);
 
               } else {
                 event.header.probe_error = true;

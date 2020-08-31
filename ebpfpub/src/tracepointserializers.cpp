@@ -524,6 +524,36 @@ void initializeParameterListForOpenByHandleAt(
   param_list_map.insert({"open_by_handle_at", std::move(parameter_list)});
 }
 
+void initializeParameterListForChdir(ParameterListMap &param_list_map) {
+  // clang-format off
+  tob::ebpfpub::IFunctionTracer::ParameterList parameter_list = {
+    {
+      "filename",
+      tob::ebpfpub::IFunctionTracer::Parameter::Type::String,
+      tob::ebpfpub::IFunctionTracer::Parameter::Mode::In,
+      {}
+    }
+  };
+  // clang-format on
+
+  param_list_map.insert({"chdir", std::move(parameter_list)});
+}
+
+void initializeParameterListForFchdir(ParameterListMap &param_list_map) {
+  // clang-format off
+  tob::ebpfpub::IFunctionTracer::ParameterList parameter_list = {
+    {
+      "fd",
+      tob::ebpfpub::IFunctionTracer::Parameter::Type::Integer,
+      tob::ebpfpub::IFunctionTracer::Parameter::Mode::In,
+      8U
+    }
+  };
+  // clang-format on
+
+  param_list_map.insert({"fchdir", std::move(parameter_list)});
+}
+
 void initializeParameterListMap(ParameterListMap &param_list_map) {
   initializeParameterListForConnect(param_list_map);
   initializeParameterListForAccept(param_list_map);
@@ -540,6 +570,8 @@ void initializeParameterListMap(ParameterListMap &param_list_map) {
   initializeParameterListForOpenAt(param_list_map);
   initializeParameterListForOpenAt2(param_list_map);
   initializeParameterListForOpenByHandleAt(param_list_map);
+  initializeParameterListForChdir(param_list_map);
+  initializeParameterListForFchdir(param_list_map);
 }
 } // namespace
 
