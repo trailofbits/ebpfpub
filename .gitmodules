@@ -1,6 +1,3 @@
-[submodule "libraries/CLI11/src"]
-	path = libraries/CLI11/src
-	url = https://github.com/CLIUtils/CLI11
 [submodule "libraries/ebpf-common/src"]
 	path = libraries/ebpf-common/src
 	url = https://github.com/trailofbits/ebpf-common

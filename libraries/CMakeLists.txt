@@ -10,7 +10,6 @@ cmake_minimum_required(VERSION 3.14.6)
 
 function(ebpfpubLibraries)
   add_subdirectory("ebpf-common")
-  add_subdirectory("CLI11")
 endfunction()
 
 ebpfpubLibraries()
