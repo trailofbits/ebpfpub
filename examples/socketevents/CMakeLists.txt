@@ -15,6 +15,7 @@ function(ebpfpubExamplesSocketEvents)
   )
 
   target_link_libraries("${PROJECT_NAME}" PRIVATE
+    cxx_target_settings
     ebpfpub
   )
 endfunction()

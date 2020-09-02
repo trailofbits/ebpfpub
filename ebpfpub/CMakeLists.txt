@@ -44,10 +44,14 @@ function(ebpfpub)
   )
 
 
-  target_link_libraries(ebpfpub PUBLIC
-    ebpf
-    error
-    utils
+  target_link_libraries(ebpfpub
+    PRIVATE
+      cxx_target_settings
+
+    PUBLIC
+      ebpf
+      error
+      utils
   )
 
   target_compile_definitions(ebpfpub PUBLIC
