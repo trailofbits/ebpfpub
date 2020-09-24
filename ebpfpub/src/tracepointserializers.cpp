@@ -432,10 +432,14 @@ void initializeParameterListForOpenAt(ParameterListMap &param_list_map) {
       8U
     },
 
+    // Make sure we get the filename when leaving. openat is prone
+    // to breakage since we don't always have the page containing
+    // the string mapped and ready (causing bpf_probe_read_str to fail)
+
     {
       "filename",
       tob::ebpfpub::IFunctionTracer::Parameter::Type::String,
-      tob::ebpfpub::IFunctionTracer::Parameter::Mode::In,
+      tob::ebpfpub::IFunctionTracer::Parameter::Mode::Out,
       {}
     },
 
