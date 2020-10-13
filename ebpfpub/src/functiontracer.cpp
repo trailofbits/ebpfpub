@@ -100,13 +100,11 @@ FunctionTracer::parseEventData(BufferReader &buffer_reader) const {
   return event_data_exp;
 }
 
-FunctionTracer::FunctionTracer(const std::string &name,
-                               const ParameterList &parameter_list,
-                               std::size_t event_map_size,
-                               IBufferStorage &buffer_storage,
-                               ebpf::PerfEventArray &perf_event_array,
-                               ebpf::IPerfEvent::Ref enter_event,
-                               ebpf::IPerfEvent::Ref exit_event)
+FunctionTracer::FunctionTracer(
+    const std::string &name, const ParameterList &parameter_list,
+    std::size_t event_map_size, IBufferStorage &buffer_storage,
+    ebpf::PerfEventArray &perf_event_array, ebpf::IPerfEvent::Ref enter_event,
+    ebpf::IPerfEvent::Ref exit_event, OptionalPidList excluded_processes)
     : d(new PrivateData(buffer_storage, perf_event_array)) {
 
   d->name = name;
@@ -193,10 +191,10 @@ FunctionTracer::FunctionTracer(const std::string &name,
   auto &event_map_ref = *d->event_map.get();
   auto &event_scratch_space_ref = *d->event_scratch_space.get();
 
-  success_exp =
-      createEnterFunction(llvm_module, event_map_ref, event_scratch_space_ref,
-                          *d->enter_event.get(), parameter_list,
-                          d->parameter_list_index, d->buffer_storage);
+  success_exp = createEnterFunction(
+      llvm_module, event_map_ref, event_scratch_space_ref,
+      *d->enter_event.get(), parameter_list, d->parameter_list_index,
+      d->buffer_storage, excluded_processes);
 
   if (success_exp.failed()) {
     throw success_exp.error();
@@ -1117,13 +1115,12 @@ StringErrorOr<llvm::Value *> FunctionTracer::getMapEntry(
   return map_entry;
 }
 
-SuccessOrStringError
-FunctionTracer::createEnterFunction(llvm::Module &module, EventMap &event_map,
-                                    EventScratchSpace &event_scratch_space,
-                                    ebpf::IPerfEvent &enter_event,
-                                    const ParameterList &parameter_list,
-                                    const ParameterListIndex &param_list_index,
-                                    IBufferStorage &buffer_storage) {
+SuccessOrStringError FunctionTracer::createEnterFunction(
+    llvm::Module &module, EventMap &event_map,
+    EventScratchSpace &event_scratch_space, ebpf::IPerfEvent &enter_event,
+    const ParameterList &parameter_list,
+    const ParameterListIndex &param_list_index, IBufferStorage &buffer_storage,
+    OptionalPidList excluded_processes) {
 
   // Create the function
   auto function_param_type =
@@ -1183,29 +1180,37 @@ FunctionTracer::createEnterFunction(llvm::Module &module, EventMap &event_map,
     return success_exp.error();
   }
 
-  // Do not trace ourselves!
+  // Exclude our own process id and anything else specified inside
+  // the excluded_processes parameter
+  PidList excluded_pid_list;
+  if (excluded_processes.has_value()) {
+    excluded_pid_list = excluded_processes.value();
+  }
+
+  excluded_pid_list.insert(getpid());
+
   auto process_id = bpf_syscall_interface->getCurrentPidTgid();
 
   process_id = builder.CreateBinOp(llvm::Instruction::LShr, process_id,
                                    builder.getInt64(32U));
 
-  auto host_pid = static_cast<std::uint64_t>(getpid());
+  for (auto pid : excluded_pid_list) {
+    auto process_id_cond = builder.CreateICmpEQ(
+        process_id, builder.getInt64(static_cast<std::uint64_t>(pid)));
 
-  auto process_id_cond =
-      builder.CreateICmpEQ(process_id, builder.getInt64(host_pid));
+    auto discard_event_bb =
+        llvm::BasicBlock::Create(context, "discard_event", function_ptr);
 
-  auto discard_event_bb =
-      llvm::BasicBlock::Create(context, "discard_event", function_ptr);
+    auto process_event_bb =
+        llvm::BasicBlock::Create(context, "process_event", function_ptr);
 
-  auto process_event_bb =
-      llvm::BasicBlock::Create(context, "process_event", function_ptr);
+    builder.CreateCondBr(process_id_cond, discard_event_bb, process_event_bb);
 
-  builder.CreateCondBr(process_id_cond, discard_event_bb, process_event_bb);
+    builder.SetInsertPoint(discard_event_bb);
+    builder.CreateRet(builder.getInt64(0));
 
-  builder.SetInsertPoint(discard_event_bb);
-  builder.CreateRet(builder.getInt64(0));
-
-  builder.SetInsertPoint(process_event_bb);
+    builder.SetInsertPoint(process_event_bb);
+  }
 
   // Acquire the event scratch space
   auto event_type = module.getTypeByName(kEventTypeName);

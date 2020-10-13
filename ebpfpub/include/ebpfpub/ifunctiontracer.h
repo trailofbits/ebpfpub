@@ -12,6 +12,7 @@
 #include <memory>
 #include <optional>
 #include <unordered_map>
+#include <unordered_set>
 #include <variant>
 #include <vector>
 
@@ -69,27 +70,30 @@ public:
 
   using EventList = std::vector<Event>;
   using ParameterList = std::vector<Parameter>;
+  using PidList = std::unordered_set<pid_t>;
+  using OptionalPidList = std::optional<PidList>;
   using Ref = std::unique_ptr<IFunctionTracer>;
 
   static StringErrorOr<Ref> createFromSyscallTracepoint(
       const std::string &name, IBufferStorage &buffer_storage,
-      ebpf::PerfEventArray &perf_event_array, std::size_t event_map_size);
+      ebpf::PerfEventArray &perf_event_array, std::size_t event_map_size,
+      OptionalPidList excluded_processes = {});
 
   static StringErrorOr<Ref> createFromSyscallTracepoint(
       const std::string &name, const ParameterList &parameter_list,
       IBufferStorage &buffer_storage, ebpf::PerfEventArray &perf_event_array,
-      std::size_t event_map_size);
+      std::size_t event_map_size, OptionalPidList excluded_processes = {});
 
-  static StringErrorOr<IFunctionTracer::Ref>
-  createFromKprobe(const std::string &name, const ParameterList &parameter_list,
-                   IBufferStorage &buffer_storage,
-                   ebpf::PerfEventArray &perf_event_array,
-                   std::size_t event_map_size);
+  static StringErrorOr<IFunctionTracer::Ref> createFromKprobe(
+      const std::string &name, const ParameterList &parameter_list,
+      IBufferStorage &buffer_storage, ebpf::PerfEventArray &perf_event_array,
+      std::size_t event_map_size, OptionalPidList excluded_processes = {});
 
   static StringErrorOr<IFunctionTracer::Ref> createFromUprobe(
       const std::string &name, const std::string &path,
       const ParameterList &parameter_list, IBufferStorage &buffer_storage,
-      ebpf::PerfEventArray &perf_event_array, std::size_t event_map_size);
+      ebpf::PerfEventArray &perf_event_array, std::size_t event_map_size,
+      OptionalPidList excluded_processes = {});
 
   IFunctionTracer() = default;
   virtual ~IFunctionTracer() = default;

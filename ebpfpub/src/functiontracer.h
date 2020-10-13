@@ -46,7 +46,8 @@ private:
                  std::size_t event_map_size, IBufferStorage &buffer_storage,
                  ebpf::PerfEventArray &perf_event_array,
                  ebpf::IPerfEvent::Ref enter_event,
-                 ebpf::IPerfEvent::Ref exit_event);
+                 ebpf::IPerfEvent::Ref exit_event,
+                 OptionalPidList excluded_processes);
 
   friend class IFunctionTracer;
 
@@ -125,13 +126,12 @@ public:
               llvm::Value *map_index_value, llvm::Type *map_entry_type,
               const std::string &label);
 
-  static SuccessOrStringError
-  createEnterFunction(llvm::Module &module, EventMap &event_map,
-                      EventScratchSpace &event_scratch_space,
-                      ebpf::IPerfEvent &enter_event,
-                      const ParameterList &parameter_list,
-                      const ParameterListIndex &param_list_index,
-                      IBufferStorage &buffer_storage);
+  static SuccessOrStringError createEnterFunction(
+      llvm::Module &module, EventMap &event_map,
+      EventScratchSpace &event_scratch_space, ebpf::IPerfEvent &enter_event,
+      const ParameterList &parameter_list,
+      const ParameterListIndex &param_list_index,
+      IBufferStorage &buffer_storage, OptionalPidList excluded_processes);
 
   static SuccessOrStringError
   generateEventHeader(llvm::IRBuilder<> &builder, ebpf::IPerfEvent &enter_event,
