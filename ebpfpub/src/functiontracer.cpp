@@ -782,6 +782,9 @@ FunctionTracer::createEventHeaderType(llvm::Module &module) {
     llvm::Type::getInt64Ty(context),
 
     // Probe error flag
+    llvm::Type::getInt64Ty(context),
+
+    // Call duration
     llvm::Type::getInt64Ty(context)
   };
   // clang-format on
@@ -1364,6 +1367,12 @@ SuccessOrStringError FunctionTracer::generateEventHeader(
 
   builder.CreateStore(builder.getInt64(0U), event_header_field);
 
+  // Call duration (initialize to zero)
+  event_header_field = builder.CreateGEP(
+      event_header, {builder.getInt32(0U), builder.getInt32(8U)});
+
+  builder.CreateStore(builder.getInt64(0U), event_header_field);
+
   return {};
 }
 
@@ -1683,6 +1692,22 @@ SuccessOrStringError FunctionTracer::createExitFunction(
 
   builder.CreateStore(function_exit_code_value, event_header_exit_code);
 
+  // Set the call duration in the event header
+  auto enter_time_ptr = builder.CreateGEP(
+      event_header, {builder.getInt32(0), builder.getInt32(2)});
+
+  auto enter_time = builder.CreateLoad(enter_time_ptr);
+
+  auto exit_time = bpf_syscall_interface->ktimeGetNs();
+
+  auto call_duration =
+      builder.CreateBinOp(llvm::Instruction::Sub, exit_time, enter_time);
+
+  auto call_duration_ptr = builder.CreateGEP(
+      event_header, {builder.getInt32(0), builder.getInt32(8)});
+
+  builder.CreateStore(call_duration, call_duration_ptr);
+
   // Acquire the buffer storage index generator
   auto buffer_storage_index_generator_exp = getMapEntry(
       buffer_storage.indexMap(), builder, *bpf_syscall_interface.get(),
@@ -1988,6 +2013,7 @@ StringErrorOr<FunctionTracer::EventList> FunctionTracer::parseEventData(
     event.header.cgroup_id = buffer_reader.u64();
     event.header.exit_code = buffer_reader.u64();
     event.header.probe_error = (buffer_reader.u64() != 0);
+    event.header.duration = buffer_reader.u64();
 
     // Get the event data
     std::unordered_map<std::string, std::uint64_t> integer_parameter_map;

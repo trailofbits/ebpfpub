@@ -46,6 +46,7 @@ public:
       std::uint64_t cgroup_id{0U};
       std::uint64_t exit_code{0U};
       bool probe_error{false};
+      std::uint64_t duration{0U};
     };
 
     struct Field final {
