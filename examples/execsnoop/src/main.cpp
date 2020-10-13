@@ -71,7 +71,8 @@ void eventParser(
               << "gid: " << event.header.group_id << " "
               << "cgroup_id: " << event.header.cgroup_id << " "
               << "exit_code: " << event.header.exit_code << " "
-              << "probe_error: " << event.header.probe_error << "\n";
+              << "probe_error: " << event.header.probe_error << " "
+              << "duration: " << event.header.duration << "\n";
 
     std::cout << "  " << event.name << "(";
 
