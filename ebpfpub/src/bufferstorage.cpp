@@ -32,8 +32,7 @@ struct BufferStorage::PrivateData final {
 BufferStorage::~BufferStorage() {}
 
 std::size_t BufferStorage::memoryUsage() const {
-  auto processor_count = static_cast<std::size_t>(get_nprocs_conf());
-  return processor_count * (bufferSize() * bufferCount());
+  return ebpf::getPossibleProcessorCount() * (bufferSize() * bufferCount());
 }
 
 std::size_t BufferStorage::bufferSize() const { return d->buffer_size; }
@@ -42,7 +41,7 @@ std::size_t BufferStorage::bufferCount() const { return d->buffer_count; }
 
 int BufferStorage::bufferMap() const { return d->buffer_map->fd(); }
 
-int BufferStorage::indexMap() const { return d->buffer_map->fd(); }
+int BufferStorage::indexMap() const { return d->index_map->fd(); }
 
 ebpf::BPFMapErrorCode BufferStorage::getBuffer(std::vector<std::uint8_t> &value,
                                                std::uint64_t index) {
@@ -50,8 +49,7 @@ ebpf::BPFMapErrorCode BufferStorage::getBuffer(std::vector<std::uint8_t> &value,
   auto key = static_cast<std::uint32_t>(index & 0xFFFFFFFFULL);
   auto processor = static_cast<std::uint32_t>((index >> 48ULL) & 0xFFULL);
 
-  auto processor_count = static_cast<std::size_t>(get_nprocs_conf());
-  if (processor >= processor_count) {
+  if (processor >= ebpf::getPossibleProcessorCount()) {
     return ebpf::BPFMapErrorCode::Value::InvalidProcessorIndex;
   }
 
