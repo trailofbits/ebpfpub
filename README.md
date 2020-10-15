@@ -35,7 +35,7 @@ tar -xf /tmp/ebpfpub/build/osquery-toolchain-1.1.0-x86_64.tar.xz -C /opt
 2. In case the `--recursive` flag was not provided, run `git submodule update --init --recursive`
 3. Enter the source folder: `cd ebpfpub`
 4. Create the build folder: `mkdir build && cd build`
-5. Configure the project: `cmake -DCMAKE_BUILD_TYPE:STRING=RelWithDebInfo -DEBPF_COMMON_TOOLCHAIN_PATH:PATH=/opt/osquery-toolchain -DEBPFPUB_ENABLE_INSTALL:BOOL=true -DEBPFPUB_ENABLE_EXAMPLES:BOOL=true -DEBPF_COMMON_ENABLE_TESTS:BOOL=true ..`
+5. Configure the project: `cmake -DCMAKE_BUILD_TYPE:STRING=RelWithDebInfo -DEBPF_COMMON_TOOLCHAIN_PATH:PATH=/opt/osquery-toolchain -DEBPFPUB_ENABLE_INSTALL:BOOL=true -DEBPFPUB_BUILD_EXAMPLES:BOOL=true -DEBPF_COMMON_ENABLE_TESTS:BOOL=true ..`
 6. Build the project: `cmake --build . -j $(($(nproc) + 1))`
 7. Run the tests: `cmake --build . --target run-ebpf-common-tests`
 
@@ -47,7 +47,7 @@ tar -xf /tmp/ebpfpub/build/osquery-toolchain-1.1.0-x86_64.tar.xz -C /opt
 2. In case the `--recursive` flag was not provided, run `git submodule update --init --recursive`
 3. Enter the source folder: `cd ebpfpub`
 4. Create the build folder: `mkdir build && cd build`
-5. Configure the project: `cmake -DCMAKE_BUILD_TYPE:STRING=RelWithDebInfo -DCMAKE_C_COMPILER:STRING=clang -DCMAKE_CXX_COMPILER=clang++ -DEBPFPUB_ENABLE_INSTALL:BOOL=true -DEBPFPUB_ENABLE_EXAMPLES:BOOL=true -DEBPF_COMMON_ENABLE_TESTS:BOOL=true ..`
+5. Configure the project: `cmake -DCMAKE_BUILD_TYPE:STRING=RelWithDebInfo -DCMAKE_C_COMPILER:STRING=clang -DCMAKE_CXX_COMPILER=clang++ -DEBPFPUB_ENABLE_INSTALL:BOOL=true -DEBPFPUB_BUILD_EXAMPLES:BOOL=true -DEBPF_COMMON_ENABLE_TESTS:BOOL=true ..`
 6. Build the project: `cmake --build . -j $(($(nproc) + 1))`
 7. Run the tests: `cmake --build . --target run-ebpf-common-tests`
 
