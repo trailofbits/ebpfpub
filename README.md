@@ -9,23 +9,23 @@ ebpfpub is a generic function tracing library for Linux that supports tracepoint
 ## Building
 
 ### Prerequisites
-* A recent Clang/LLVM installation (8.0 or better), compiled with BPF support.
-  * Test for the support: `llc --version | grep bpf` and check that BPF is listed as a registered target.
 * A recent libc++ or stdc++ library, supporting C++17
 * CMake >= 3.16.2. A pre-built binary can be downloaded from the [CMake's download page](https://cmake.org/download/).
 * Linux kernel >= 4.18 (Ubuntu 18.10, CentOS 8, Red Hat Enterprise Linux 8).
   * Test for the support: ``grep BPF /boot/config-`uname -r` `` and check the output for `CONFIG_BPF=y` and `CONFIG_BPF_SYSCALL=y`
+* Optional, but highly recommended: Download the osquery-toolchain: https://github.com/osquery/osquery-toolchain/releases/download/1.1.0/osquery-toolchain-1.1.0-x86_64.tar.xz
+* If _not_ using the osquery-toolchain (if building with the system toolchain):
+  * A recent Clang/LLVM installation (8.0 or better), compiled with BPF support.
+    * Test for the support: `llc --version | grep bpf` and check that BPF is listed as a registered target.
+    * Please note that LLVM itself must be compiled with libc++ when enabling the `EBPF_COMMON_ENABLE_LIBCPP` option, since ebfpub will directly link against the LLVM libraries.
+  * The packages `llvm-devel` (for `LLVMConfig.cmake` files), `llvm-static` (for additional LLVM libraries), and `ncurses-devel` (for `libtinfo`)
 
-Please note that LLVM itself must be compiled with libc++ when enabling the `EBPF_COMMON_ENABLE_LIBCPP` option, since ebfpub will directly link against the LLVM libraries.
-
-### Dependencies
+### Dependencies (retrieved with git)
 * [ebpf-common](https://github.com/trailofbits/ebpf-common)
 
 ### Building with the osquery toolchain (preferred)
 
 **This should work fine on any recent Linux distribution. The binaries generated with this toolchain are portable and can be deployed on any distro >= CentOS 6/Ubuntu 16.04**
-
-Download the osquery-toolchain: https://github.com/osquery/osquery-toolchain/releases/download/1.1.0/osquery-toolchain-1.1.0-x86_64.tar.xz
 
 1. Obtain the source code: `git clone --recursive https://github.com/trailofbits/ebpfpub`
 2. In case the `--recursive` flag was not provided, run `git submodule update --init --recursive`
@@ -37,7 +37,7 @@ Download the osquery-toolchain: https://github.com/osquery/osquery-toolchain/rel
 
 ### Building with the system toolchain
 
-**Note that this will fail unless clang and the C++ library both support C++17**. Recent distributions should be compatible (tested on Arch Linux, Ubuntu 19.10).
+**Note that this will fail unless Clang and the C++ library both support C++17**. Recent distributions should be compatible (tested on Arch Linux, Ubuntu 19.10 and above).
 
 1. Obtain the source code: `git clone --recursive https://github.com/trailofbits/ebpfpub`
 2. In case the `--recursive` flag was not provided, run `git submodule update --init --recursive`
