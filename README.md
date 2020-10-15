@@ -9,10 +9,12 @@ ebpfpub is a generic function tracing library for Linux that supports tracepoint
 ## Building
 
 ### Prerequisites
-* A recent Clang/LLVM installation (8.0 or better), compiled with BPF support
+* A recent Clang/LLVM installation (8.0 or better), compiled with BPF support.
+  * Test for the support: `llc --version | grep bpf` and check that BPF is listed as a registered target.
 * A recent libc++ or stdc++ library, supporting C++17
 * CMake >= 3.16.2. A pre-built binary can be downloaded from the [CMake's download page](https://cmake.org/download/).
-* Linux kernel >= 4.18 (Ubuntu 18.10)
+* Linux kernel >= 4.18 (Ubuntu 18.10, CentOS 8, Red Hat Enterprise Linux 8).
+  * Test for the support: ``grep BPF /boot/config-`uname -r` `` and check the output for `CONFIG_BPF=y` and `CONFIG_BPF_SYSCALL=y`
 
 Please note that LLVM itself must be compiled with libc++ when enabling the `EBPF_COMMON_ENABLE_LIBCPP` option, since ebfpub will directly link against the LLVM libraries.
 
