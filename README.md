@@ -13,6 +13,7 @@ ebpfpub is a generic function tracing library for Linux that supports tracepoint
 * CMake >= 3.16.2. A pre-built binary can be downloaded from the [CMake's download page](https://cmake.org/download/).
 * Linux kernel >= 4.18 (Ubuntu 18.10, CentOS 8, Red Hat Enterprise Linux 8).
   * Test for the support: ``grep BPF /boot/config-`uname -r` `` and check the output for `CONFIG_BPF=y` and `CONFIG_BPF_SYSCALL=y`
+* The package `libz-dev`, needed during linking.
 * Optional, but highly recommended: Download the osquery-toolchain: https://github.com/osquery/osquery-toolchain/releases/download/1.1.0/osquery-toolchain-1.1.0-x86_64.tar.xz
   * **This should work fine on any recent Linux distribution. The binaries generated with this toolchain are portable and can be deployed on any distro >= CentOS 6/Ubuntu 16.04**
 * If _not_ using the osquery-toolchain (if building with the system toolchain):
