@@ -9,6 +9,7 @@ ebpfpub is a generic function tracing library for Linux that supports tracepoint
 ## Building
 
 ### Prerequisites
+
 * A recent libc++ or stdc++ library, supporting C++17
 * CMake >= 3.16.2. A pre-built binary can be downloaded from the [CMake's download page](https://cmake.org/download/).
 * Linux kernel >= 4.18 (Ubuntu 18.10, CentOS 8, Red Hat Enterprise Linux 8).
@@ -24,14 +25,16 @@ ebpfpub is a generic function tracing library for Linux that supports tracepoint
   * The packages `llvm-devel` (for `LLVMConfig.cmake` files), `llvm-static` (for additional LLVM libraries), and `ncurses-devel` (for `libtinfo`)
 
 #### Installing the osquery-toolchain
+
 As root:
-```bash
+```shell
 cd /tmp
 wget https://github.com/osquery/osquery-toolchain/releases/download/1.1.0/osquery-toolchain-1.1.0-x86_64.tar.xz 
 tar -xf /tmp/ebpfpub/build/osquery-toolchain-1.1.0-x86_64.tar.xz -C /opt
 ```
 
 ### Dependencies (retrieved with git)
+
 * [ebpf-common](https://github.com/trailofbits/ebpf-common)
 
 ### Steps to Build
@@ -45,17 +48,19 @@ tar -xf /tmp/ebpfpub/build/osquery-toolchain-1.1.0-x86_64.tar.xz -C /opt
 6. Build the project: `cmake --build . -j $(($(nproc) + 1))`
 7. Run the tests: `cmake --build . --target run-ebpf-common-tests`
 
-### Building the packages
+## Building the package
 
-## Prerequisites
+### Prerequisites for packaging
+
 * DEB: **dpkg** command
 * RPM: **rpm** command
 * TGZ: **tar** command
 
-## Steps
+### Steps to package
+
 Make sure that the `-DEBPFPUB_ENABLE_INSTALL:BOOL=true` parameter has been passed at configure time, then run the following commands inside the build folder:
 
-```
+```shell
 mkdir install
 export DESTDIR=`realpath install`
 
@@ -65,7 +70,7 @@ cmake --build . --target install
 
 Configure the packaging project:
 
-```
+```shell
 mkdir package
 cd package
 
