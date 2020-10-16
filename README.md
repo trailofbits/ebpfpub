@@ -28,6 +28,14 @@ ebpfpub is a generic function tracing library for Linux that supports tracepoint
 
 ### Steps to Build
 
+As root, download and install the osquery-toolchain:
+
+```bash
+cd /tmp
+wget https://github.com/osquery/osquery-toolchain/releases/download/1.1.0/osquery-toolchain-1.1.0-x86_64.tar.xz 
+tar -xf /tmp/ebpfpub/build/osquery-toolchain-1.1.0-x86_64.tar.xz -C /opt
+```
+
 1. Obtain the source code: `git clone --recursive https://github.com/trailofbits/ebpfpub`
 2. In case the `--recursive` flag was not provided, run `git submodule update --init --recursive`
 3. Enter the source folder: `cd ebpfpub`
