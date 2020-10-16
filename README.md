@@ -14,7 +14,7 @@ ebpfpub is a generic function tracing library for Linux that supports tracepoint
 * Linux kernel >= 4.18 (Ubuntu 18.10, CentOS 8, Red Hat Enterprise Linux 8).
   * Test for the support: ``grep BPF /boot/config-`uname -r` `` and check the output for `CONFIG_BPF=y` and `CONFIG_BPF_SYSCALL=y`
 * The package `libz-dev`, needed during linking.
-* Optional, but highly recommended: Download the osquery-toolchain: https://github.com/osquery/osquery-toolchain/releases/download/1.1.0/osquery-toolchain-1.1.0-x86_64.tar.xz
+* Optional, but highly recommended: download and install the osquery-toolchain (see below).
   * **This should work fine on any recent Linux distribution. The binaries generated with this toolchain are portable and can be deployed on any distro >= CentOS 6/Ubuntu 16.04**
 * If _not_ using the osquery-toolchain (if building with the system toolchain):
   * **Clang and the C++ library must both support C++17**. Recent distributions should be compatible (tested on Arch Linux, Ubuntu 19.10 and above).
@@ -23,18 +23,18 @@ ebpfpub is a generic function tracing library for Linux that supports tracepoint
     * Please note that LLVM itself must be compiled with libc++ when enabling the `EBPF_COMMON_ENABLE_LIBCPP` option, since ebfpub will directly link against the LLVM libraries.
   * The packages `llvm-devel` (for `LLVMConfig.cmake` files), `llvm-static` (for additional LLVM libraries), and `ncurses-devel` (for `libtinfo`)
 
-### Dependencies (retrieved with git)
-* [ebpf-common](https://github.com/trailofbits/ebpf-common)
-
-### Steps to Build
-
-As root, download and install the osquery-toolchain:
-
+#### Installing the osquery-toolchain
+As root:
 ```bash
 cd /tmp
 wget https://github.com/osquery/osquery-toolchain/releases/download/1.1.0/osquery-toolchain-1.1.0-x86_64.tar.xz 
 tar -xf /tmp/ebpfpub/build/osquery-toolchain-1.1.0-x86_64.tar.xz -C /opt
 ```
+
+### Dependencies (retrieved with git)
+* [ebpf-common](https://github.com/trailofbits/ebpf-common)
+
+### Steps to Build
 
 1. Obtain the source code: `git clone --recursive https://github.com/trailofbits/ebpfpub`
 2. In case the `--recursive` flag was not provided, run `git submodule update --init --recursive`
