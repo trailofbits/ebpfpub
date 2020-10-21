@@ -37,14 +37,18 @@ IFunctionTracer::createFromSyscallTracepoint(
     std::size_t event_map_size, OptionalPidList excluded_processes) {
 
   try {
-    auto event_exp = ebpf::IPerfEvent::createTracepoint(name, false);
+    auto event_exp =
+        ebpf::IPerfEvent::createTracepoint("syscalls", "sys_enter_" + name);
+
     if (!event_exp.succeeded()) {
       return event_exp.error();
     }
 
     auto enter_event = event_exp.takeValue();
 
-    event_exp = ebpf::IPerfEvent::createTracepoint(name, true);
+    event_exp =
+        ebpf::IPerfEvent::createTracepoint("syscalls", "sys_exit_" + name);
+
     if (!event_exp.succeeded()) {
       return event_exp.error();
     }

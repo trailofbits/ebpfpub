@@ -22,6 +22,9 @@ function(ebpfpub)
     src/bufferstorage.h
     src/bufferstorage.cpp
 
+    src/forknamespacehelper.h
+    src/forknamespacehelper.cpp
+
     src/functiontracer.h
     src/functiontracer.cpp
 
@@ -42,7 +45,6 @@ function(ebpfpub)
   target_include_directories(ebpfpub
     SYSTEM INTERFACE include
   )
-
 
   target_link_libraries(ebpfpub
     PRIVATE

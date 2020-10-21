@@ -8,6 +8,7 @@
 
 #include "functiontracer.h"
 #include "abi.h"
+#include "forknamespacehelper.h"
 
 #include <limits>
 #include <unordered_set>
@@ -75,6 +76,8 @@ struct FunctionTracer::PrivateData final {
 
   utils::UniqueFd enter_program;
   utils::UniqueFd exit_program;
+
+  ForkNamespaceHelper::Ref fork_ns_helper;
 };
 
 FunctionTracer::~FunctionTracer() {}
@@ -200,10 +203,16 @@ FunctionTracer::FunctionTracer(
     throw success_exp.error();
   }
 
-  // Assemble the exit function
-  success_exp = createExitFunction(
-      llvm_module, event_map_ref, *d->exit_event.get(), parameter_list,
-      d->parameter_list_index, d->buffer_storage, d->perf_event_array);
+  // Assemble the exit function; if this is a fork syscall, ask the
+  // createExitFunction method to *NOT* update the exit code
+  // automatically
+  auto create_fork_ns_helper =
+      d->name == "fork" || d->name == "vfork" || d->name == "clone";
+
+  success_exp = createExitFunction(llvm_module, event_map_ref,
+                                   *d->exit_event.get(), parameter_list,
+                                   d->parameter_list_index, d->buffer_storage,
+                                   d->perf_event_array, create_fork_ns_helper);
 
   if (success_exp.failed()) {
     throw success_exp.error();
@@ -276,6 +285,16 @@ FunctionTracer::FunctionTracer(
   }
 
   d->exit_program = program_exp.takeValue();
+
+  // Create the fork namespace helper if required
+  if (create_fork_ns_helper) {
+    auto fork_ns_helper_exp = ForkNamespaceHelper::create(d->event_map->fd());
+    if (!fork_ns_helper_exp.succeeded()) {
+      throw fork_ns_helper_exp.error();
+    }
+
+    d->fork_ns_helper = fork_ns_helper_exp.takeValue();
+  }
 }
 
 StringErrorOr<llvm::Value *>
@@ -1562,7 +1581,7 @@ SuccessOrStringError FunctionTracer::createExitFunction(
     llvm::Module &module, EventMap &event_map, ebpf::IPerfEvent &exit_event,
     const ParameterList &parameter_list,
     const ParameterListIndex &param_list_index, IBufferStorage &buffer_storage,
-    ebpf::PerfEventArray &perf_event_array) {
+    ebpf::PerfEventArray &perf_event_array, bool skip_exit_code) {
 
   // Create the function
   auto function_param_type =
@@ -1663,34 +1682,36 @@ SuccessOrStringError FunctionTracer::createExitFunction(
   auto event_header = builder.CreateGEP(
       event_entry, {builder.getInt32(0), builder.getInt32(0)});
 
-  auto event_header_exit_code = builder.CreateGEP(
-      event_header, {builder.getInt32(0), builder.getInt32(6)});
-
   // Update the exit code in the event header
-  llvm::Value *function_exit_code_value{nullptr};
+  if (!skip_exit_code) {
+    auto event_header_exit_code = builder.CreateGEP(
+        event_header, {builder.getInt32(0), builder.getInt32(6)});
 
-  if (exit_event.type() == ebpf::IPerfEvent::Type::Tracepoint) {
-    // Skip the tracepoint header and get the 'ret' parameter
-    auto function_exit_code = builder.CreateGEP(
-        exit_function_args, {builder.getInt32(0), builder.getInt32(5)});
+    llvm::Value *function_exit_code_value{nullptr};
 
-    function_exit_code_value = builder.CreateLoad(function_exit_code);
+    if (exit_event.type() == ebpf::IPerfEvent::Type::Tracepoint) {
+      // Skip the tracepoint header and get the 'ret' parameter
+      auto function_exit_code = builder.CreateGEP(
+          exit_function_args, {builder.getInt32(0), builder.getInt32(5)});
 
-  } else {
-    // TODO(alessandro): other architectures will use a different register
-    auto function_exit_code_value_exp =
-        getPtRegsParameterFromName(builder, exit_function_args, "rax");
+      function_exit_code_value = builder.CreateLoad(function_exit_code);
 
-    if (!function_exit_code_value_exp.succeeded()) {
-      return function_exit_code_value_exp.error();
+    } else {
+      // TODO(alessandro): other architectures will use a different register
+      auto function_exit_code_value_exp =
+          getPtRegsParameterFromName(builder, exit_function_args, "rax");
+
+      if (!function_exit_code_value_exp.succeeded()) {
+        return function_exit_code_value_exp.error();
+      }
+
+      auto function_exit_code_index = function_exit_code_value_exp.takeValue();
+
+      function_exit_code_value = builder.CreateLoad(function_exit_code_index);
     }
 
-    auto function_exit_code_index = function_exit_code_value_exp.takeValue();
-
-    function_exit_code_value = builder.CreateLoad(function_exit_code_index);
+    builder.CreateStore(function_exit_code_value, event_header_exit_code);
   }
-
-  builder.CreateStore(function_exit_code_value, event_header_exit_code);
 
   // Set the call duration in the event header
   auto enter_time_ptr = builder.CreateGEP(
