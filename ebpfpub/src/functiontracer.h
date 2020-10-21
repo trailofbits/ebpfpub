@@ -54,7 +54,6 @@ private:
 public:
   using StackAllocationList = std::unordered_map<std::string, llvm::Value *>;
   using VariableList = std::unordered_map<std::string, llvm::Value *>;
-
   using EventMap = ebpf::BPFMap<BPF_MAP_TYPE_HASH, std::uint64_t>;
 
   using EventScratchSpace =
@@ -151,7 +150,8 @@ public:
       llvm::Module &module, EventMap &event_map, ebpf::IPerfEvent &exit_event,
       const ParameterList &parameter_list,
       const ParameterListIndex &param_list_index,
-      IBufferStorage &buffer_storage, ebpf::PerfEventArray &perf_event_array);
+      IBufferStorage &buffer_storage, ebpf::PerfEventArray &perf_event_array,
+      bool skip_exit_code);
 
   static SuccessOrStringError generateExitEventData(
       llvm::IRBuilder<> &builder, ebpf::IPerfEvent &exit_event,
