@@ -283,7 +283,7 @@ void initializeParameterListForNameToHandleAt(
     {
       "handle",
       tob::ebpfpub::IFunctionTracer::Parameter::Type::Buffer,
-      tob::ebpfpub::IFunctionTracer::Parameter::Mode::In,
+      tob::ebpfpub::IFunctionTracer::Parameter::Mode::Out,
       static_cast<std::size_t>(MAX_HANDLE_SZ)
     },
 
