@@ -276,7 +276,7 @@ void initializeParameterListForNameToHandleAt(
     {
       "name",
       tob::ebpfpub::IFunctionTracer::Parameter::Type::String,
-      tob::ebpfpub::IFunctionTracer::Parameter::Mode::In,
+      tob::ebpfpub::IFunctionTracer::Parameter::Mode::Out,
       {}
     },
 
@@ -284,7 +284,7 @@ void initializeParameterListForNameToHandleAt(
       "handle",
       tob::ebpfpub::IFunctionTracer::Parameter::Type::Buffer,
       tob::ebpfpub::IFunctionTracer::Parameter::Mode::Out,
-      static_cast<std::size_t>(MAX_HANDLE_SZ)
+      static_cast<std::size_t>(8U + MAX_HANDLE_SZ)
     },
 
     {
@@ -325,7 +325,7 @@ void initializeParameterListForCreat(ParameterListMap &param_list_map) {
   };
   // clang-format on
 
-  param_list_map.insert({"name_to_handle_at", std::move(parameter_list)});
+  param_list_map.insert({"creat", std::move(parameter_list)});
 }
 
 void initializeParameterListForMknod(ParameterListMap &param_list_map) {
@@ -354,7 +354,7 @@ void initializeParameterListForMknod(ParameterListMap &param_list_map) {
   };
   // clang-format on
 
-  param_list_map.insert({"name_to_handle_at", std::move(parameter_list)});
+  param_list_map.insert({"mknod", std::move(parameter_list)});
 }
 
 void initializeParameterListForMknodAt(ParameterListMap &param_list_map) {
@@ -390,7 +390,7 @@ void initializeParameterListForMknodAt(ParameterListMap &param_list_map) {
   };
   // clang-format on
 
-  param_list_map.insert({"name_to_handle_at", std::move(parameter_list)});
+  param_list_map.insert({"mknodat", std::move(parameter_list)});
 }
 
 void initializeParameterListForOpen(ParameterListMap &param_list_map) {
@@ -513,7 +513,7 @@ void initializeParameterListForOpenByHandleAt(
       "handle",
       tob::ebpfpub::IFunctionTracer::Parameter::Type::Buffer,
       tob::ebpfpub::IFunctionTracer::Parameter::Mode::In,
-      static_cast<std::size_t>(MAX_HANDLE_SZ)
+      static_cast<std::size_t>(8U + MAX_HANDLE_SZ)
     },
 
     {
