@@ -569,7 +569,10 @@ SuccessOrStringError FunctionTracer::validateParameterList(
   std::unordered_set<std::string> valid_integer_list;
   std::unordered_set<std::string> parameter_name_list;
 
-  for (const auto &param : parameter_list) {
+  for (auto param_it = parameter_list.begin(); param_it != parameter_list.end();
+       ++param_it) {
+    const auto &param = *param_it;
+
     // Make sure the parameter name does not contain the special separator
     // that we use internally
     if (param.name.find(':') != std::string::npos) {
@@ -585,12 +588,20 @@ SuccessOrStringError FunctionTracer::validateParameterList(
     parameter_name_list.insert(param.name);
 
     // The function exit code can be re-captured explicitly using
-    // a custom type. This is done using the `exit_code` variable
+    // a custom type. This is done using the `EXIT_CODE` variable
     // name, and it must be set as an OUT parameter
-    if (param.name == kSpecialExitCodeParameterName &&
-        param.mode != Parameter::Mode::Out) {
-      return StringError::create(
-          "The special ':exit_code' parameter can only be set as OUT");
+    if (param.name == kSpecialExitCodeParameterName) {
+      if (param.mode != Parameter::Mode::Out) {
+        return StringError::create(
+            "The special 'EXIT_CODE' parameter can only be set as OUT");
+      }
+
+      // This has to be the last argument since otherwise it will
+      // cause the indexes to out of sync with the real parameters
+      if (std::next(param_it) != parameter_list.end()) {
+        return StringError::create(
+            "The special 'EXIT_CODE' parameter has to be specified last");
+      }
     }
 
     // Validate the type
@@ -959,7 +970,7 @@ SuccessOrStringError FunctionTracer::createEnterFunctionArgumentType(
     for (const auto &param : parameter_list) {
       llvm::Type *field_type{nullptr};
 
-      // Skip the special ":exit_code" parameter, if defined
+      // Skip the special "EXIT_CODE" parameter, if defined
       if (param.name == kSpecialExitCodeParameterName) {
         continue;
       }
@@ -1070,7 +1081,7 @@ FunctionTracer::createExitFunctionArgumentType(llvm::Module &module,
     }
 
   } else {
-    // u(ret)probes and k(ret)probes only use the pt_regs structure
+    // u(ret)probes and {k,u}(ret)probes only use the pt_regs structure
     function_param_type_exp =
         ebpf::getPtRegsStructure(module, kExitFunctionParameterTypeName);
   }
@@ -1430,8 +1441,11 @@ SuccessOrStringError FunctionTracer::generateEnterEventData(
     // We have to map the parameter index (1 to 6) to the right register
     // according to the ABI, and then get the right field from the pt_regs
     // structure
-    if (enter_event.type() == ebpf::IPerfEvent::Type::Kprobe) {
+    if (enter_event.type() == ebpf::IPerfEvent::Type::Kprobe ||
+        enter_event.type() == ebpf::IPerfEvent::Type::Uprobe) {
+
       auto args_index_exp = translateParameterNumberToPtregsIndex(args_index);
+
       if (!args_index_exp.succeeded()) {
         return args_index_exp.error();
       }
@@ -1706,11 +1720,42 @@ SuccessOrStringError FunctionTracer::createExitFunction(
       }
 
       auto function_exit_code_index = function_exit_code_value_exp.takeValue();
-
       function_exit_code_value = builder.CreateLoad(function_exit_code_index);
     }
 
     builder.CreateStore(function_exit_code_value, event_header_exit_code);
+
+    // If we are required to also re-capture the exit code with the special
+    // EXIT_CODE parameter, then copy this value inside the EventData struct.
+    // The capture logic will take from here and do the rest of the work for us.
+    auto exit_code_it = std::find_if(
+        param_list_index.begin(), param_list_index.end(),
+
+        [&parameter_list](
+            const FunctionTracer::ParameterListIndexEntry &index_entry)
+            -> bool {
+          const auto &param = parameter_list.at(index_entry.param_index);
+          return param.name == kSpecialExitCodeParameterName;
+        });
+
+    if (exit_code_it != param_list_index.end()) {
+      const auto &exit_code_entry = *exit_code_it;
+
+      if (!exit_code_entry.destination_index_out_opt.has_value()) {
+        return StringError::create("");
+      }
+
+      auto exit_dest_index = static_cast<std::uint32_t>(
+          exit_code_entry.destination_index_out_opt.value());
+
+      auto event_data = builder.CreateGEP(
+          event_entry, {builder.getInt32(0), builder.getInt32(1)});
+
+      auto exit_event_data_field = builder.CreateGEP(
+          event_data, {builder.getInt32(0), builder.getInt32(exit_dest_index)});
+
+      builder.CreateStore(function_exit_code_value, exit_event_data_field);
+    }
   }
 
   // Set the call duration in the event header
@@ -1718,7 +1763,6 @@ SuccessOrStringError FunctionTracer::createExitFunction(
       event_header, {builder.getInt32(0), builder.getInt32(2)});
 
   auto enter_time = builder.CreateLoad(enter_time_ptr);
-
   auto exit_time = bpf_syscall_interface->ktimeGetNs();
 
   auto call_duration =
