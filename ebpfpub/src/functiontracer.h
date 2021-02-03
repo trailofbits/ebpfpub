@@ -153,14 +153,15 @@ public:
       IBufferStorage &buffer_storage, ebpf::PerfEventArray &perf_event_array,
       bool skip_exit_code);
 
-  static SuccessOrStringError generateExitEventData(
-      llvm::IRBuilder<> &builder, ebpf::IPerfEvent &exit_event,
-      ebpf::BPFSyscallInterface &bpf_syscall_interface,
-      llvm::Value *event_object, const ParameterList &parameter_list,
-      const ParameterListIndex &param_list_index,
-      IBufferStorage &buffer_storage,
-      const StackAllocationList &allocation_list,
-      const VariableList &variable_list);
+  static SuccessOrStringError
+  generateExitEventData(llvm::IRBuilder<> &builder,
+                        ebpf::BPFSyscallInterface &bpf_syscall_interface,
+                        llvm::Value *event_object,
+                        const ParameterList &parameter_list,
+                        const ParameterListIndex &param_list_index,
+                        IBufferStorage &buffer_storage,
+                        const StackAllocationList &allocation_list,
+                        const VariableList &variable_list);
 
   static void
   captureIntegerByPointer(llvm::IRBuilder<> &builder,

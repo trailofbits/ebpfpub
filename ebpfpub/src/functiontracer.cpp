@@ -10,6 +10,7 @@
 #include "abi.h"
 #include "forknamespacehelper.h"
 
+#include <iostream>
 #include <limits>
 #include <unordered_set>
 
@@ -1197,6 +1198,17 @@ SuccessOrStringError FunctionTracer::createEnterFunction(
   // Allocate the required stack space
   StackAllocationList stack_allocation_list;
 
+  if (enter_event.type() == ebpf::IPerfEvent::Type::Kprobe) {
+    auto args_type = module.getTypeByName(kEnterFunctionParameterTypeName);
+
+    auto success_exp = allocateStackSpace(stack_allocation_list, "pt_regs",
+                                          builder, args_type);
+
+    if (success_exp.failed()) {
+      return success_exp.error();
+    }
+  }
+
   auto success_exp =
       allocateStackSpace(stack_allocation_list, "generic_map_index_32", builder,
                          builder.getInt32Ty());
@@ -1425,7 +1437,56 @@ SuccessOrStringError FunctionTracer::generateEnterEventData(
   // Get the args parameter from the function
   auto current_bb = builder.GetInsertBlock();
   auto current_function = current_bb->getParent();
-  auto args_data = current_function->arg_begin();
+
+  llvm::Value *args_data = current_function->arg_begin();
+
+  if (enter_event.type() == ebpf::IPerfEvent::Type::Kprobe) {
+    // The real pt_regs is pointed to by the first argument
+    auto first_arg_index_exp = translateParameterNumberToPtregsIndex(0);
+    if (!first_arg_index_exp.succeeded()) {
+      return first_arg_index_exp.error();
+    }
+
+    auto first_arg_index =
+        static_cast<std::uint32_t>(first_arg_index_exp.takeValue());
+
+    auto real_pt_regs_ptr_ref = builder.CreateGEP(
+        args_data, {builder.getInt32(0), builder.getInt32(first_arg_index)});
+
+    auto real_pt_regs_ptr = builder.CreateLoad(real_pt_regs_ptr_ref);
+
+    // Get the space we have allocated for the new ptr_regs
+    auto new_pt_regs_exp = getStackAllocation(allocation_list, "pt_regs");
+    if (!new_pt_regs_exp.succeeded()) {
+      return new_pt_regs_exp.error();
+    }
+
+    args_data = new_pt_regs_exp.takeValue();
+
+    // Determine how many fields we have to copy
+    auto module = current_bb->getModule();
+    llvm::DataLayout data_layout(module);
+
+    auto pt_regs_type = args_data->getType()->getPointerElementType();
+
+    auto pt_regs_size =
+        static_cast<std::uint32_t>(data_layout.getTypeAllocSize(pt_regs_type));
+
+    auto field_count = pt_regs_size / 8U;
+
+    for (std::uint32_t field_index = 0U; field_index < field_count;
+         ++field_index) {
+      auto destination_ptr = builder.CreateGEP(
+          args_data, {builder.getInt32(0), builder.getInt32(field_index)});
+
+      auto source_ptr =
+          builder.CreateBinOp(llvm::Instruction::Add, real_pt_regs_ptr,
+                              builder.getInt64(field_index * 8));
+
+      bpf_syscall_interface.probeRead(destination_ptr, builder.getInt32(8),
+                                      source_ptr);
+    }
+  }
 
   // Go through each parameter and copy it (by value) to the event data
   // structure
@@ -1796,9 +1857,8 @@ SuccessOrStringError FunctionTracer::createExitFunction(
 
   // Generate the event data
   success_exp = generateExitEventData(
-      builder, exit_event, *bpf_syscall_interface.get(), event_entry,
-      parameter_list, param_list_index, buffer_storage, stack_allocation_list,
-      variable_list);
+      builder, *bpf_syscall_interface.get(), event_entry, parameter_list,
+      param_list_index, buffer_storage, stack_allocation_list, variable_list);
 
   if (success_exp.failed()) {
     return success_exp.error();
@@ -1821,7 +1881,7 @@ SuccessOrStringError FunctionTracer::createExitFunction(
 }
 
 SuccessOrStringError FunctionTracer::generateExitEventData(
-    llvm::IRBuilder<> &builder, ebpf::IPerfEvent &exit_event,
+    llvm::IRBuilder<> &builder,
     ebpf::BPFSyscallInterface &bpf_syscall_interface, llvm::Value *event_object,
     const ParameterList &valid_param_list,
     const ParameterListIndex &param_list_index, IBufferStorage &buffer_storage,
