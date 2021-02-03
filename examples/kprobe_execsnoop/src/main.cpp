@@ -19,7 +19,7 @@
 #include <sys/resource.h>
 
 // clang-format off
-tob::ebpfpub::IFunctionTracer::ParameterList kExecveParameterList = {
+const tob::ebpfpub::IFunctionTracer::ParameterList kExecveParameterList = {
   {
     "filename",
     tob::ebpfpub::IFunctionTracer::Parameter::Type::String,
@@ -31,11 +31,50 @@ tob::ebpfpub::IFunctionTracer::ParameterList kExecveParameterList = {
     "argv",
     tob::ebpfpub::IFunctionTracer::Parameter::Type::Argv,
     tob::ebpfpub::IFunctionTracer::Parameter::Mode::In,
-    25U
+    10U
   },
 
   {
     "envp",
+    tob::ebpfpub::IFunctionTracer::Parameter::Type::Integer,
+    tob::ebpfpub::IFunctionTracer::Parameter::Mode::In,
+    8U
+  }
+};
+// clang-format on
+
+// clang-format off
+const tob::ebpfpub::IFunctionTracer::ParameterList kExecveatParameterList = {
+  {
+    "fd",
+    tob::ebpfpub::IFunctionTracer::Parameter::Type::Integer,
+    tob::ebpfpub::IFunctionTracer::Parameter::Mode::In,
+    8U
+  },
+
+  {
+    "filename",
+    tob::ebpfpub::IFunctionTracer::Parameter::Type::String,
+    tob::ebpfpub::IFunctionTracer::Parameter::Mode::In,
+    {}
+  },
+
+  {
+    "argv",
+    tob::ebpfpub::IFunctionTracer::Parameter::Type::Argv,
+    tob::ebpfpub::IFunctionTracer::Parameter::Mode::In,
+    10U
+  },
+
+  {
+    "envp",
+    tob::ebpfpub::IFunctionTracer::Parameter::Type::Integer,
+    tob::ebpfpub::IFunctionTracer::Parameter::Mode::In,
+    8U
+  },
+
+  {
+    "flags",
     tob::ebpfpub::IFunctionTracer::Parameter::Type::Integer,
     tob::ebpfpub::IFunctionTracer::Parameter::Mode::In,
     8U
@@ -103,6 +142,7 @@ void eventParser(
 
     const auto &filename =
         std::get<std::string>(event.in_field_map.at("filename").data_var);
+
     std::cout << "filename: " << filename << ", ";
 
     const auto &envp =
@@ -128,6 +168,20 @@ void eventParser(
 
     std::cout << " })\n\n";
   }
+}
+
+std::string getKprobeName(const std::string &syscall_name) {
+#ifdef __aarch64__
+  static const std::string kSyscallPrefix{"__arm64_sys_"};
+
+#elif __amd64__
+  static const std::string kSyscallPrefix{"__x64_sys_"};
+
+#else
+#error Unsupported architecture
+#endif
+
+  return kSyscallPrefix + syscall_name;
 }
 
 int main(int argc, char *argv[]) {
@@ -160,7 +214,7 @@ int main(int argc, char *argv[]) {
   auto perf_event_reader = perf_event_reader_exp.takeValue();
 
   auto function_tracer_exp = tob::ebpfpub::IFunctionTracer::createFromKprobe(
-      "__x64_sys_execve", kExecveParameterList, *buffer_storage.get(),
+      getKprobeName("execveat"), kExecveatParameterList, *buffer_storage.get(),
       *perf_event_array.get(), 1024);
 
   if (!function_tracer_exp.succeeded()) {
@@ -169,6 +223,18 @@ int main(int argc, char *argv[]) {
   }
 
   auto function_tracer = function_tracer_exp.takeValue();
+  perf_event_reader->insert(std::move(function_tracer));
+
+  function_tracer_exp = tob::ebpfpub::IFunctionTracer::createFromKprobe(
+      getKprobeName("execve"), kExecveParameterList, *buffer_storage.get(),
+      *perf_event_array.get(), 1024);
+
+  if (!function_tracer_exp.succeeded()) {
+    throw std::runtime_error("Failed to create the function tracer: " +
+                             function_tracer_exp.error().message());
+  }
+
+  function_tracer = function_tracer_exp.takeValue();
   perf_event_reader->insert(std::move(function_tracer));
 
   while (true) {

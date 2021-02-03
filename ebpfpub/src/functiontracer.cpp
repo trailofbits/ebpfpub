@@ -1772,9 +1772,8 @@ SuccessOrStringError FunctionTracer::createExitFunction(
       function_exit_code_value = builder.CreateLoad(function_exit_code);
 
     } else {
-      // TODO(alessandro): other architectures will use a different register
       auto function_exit_code_value_exp =
-          getPtRegsParameterFromName(builder, exit_function_args, "rax");
+          getReturnValuePtregsEntry(builder, exit_function_args);
 
       if (!function_exit_code_value_exp.succeeded()) {
         return function_exit_code_value_exp.error();
