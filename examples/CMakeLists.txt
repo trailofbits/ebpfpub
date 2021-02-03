@@ -15,6 +15,7 @@ function(ebpfpubExamples)
     add_subdirectory("socketevents")
     add_subdirectory("execsnoop")
     add_subdirectory("readline_trace")
+    add_subdirectory("kprobe_execsnoop")
   endif()
 
   if(EBFPPUB_BUILD_SOCKETMONITOR_EXAMPLE)
