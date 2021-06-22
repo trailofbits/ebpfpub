@@ -9,6 +9,7 @@
 #include "functiontracer.h"
 #include "abi.h"
 #include "forknamespacehelper.h"
+#include "llvm_compat.h"
 
 #include <iostream>
 #include <limits>
@@ -820,7 +821,7 @@ FunctionTracer::createEventHeaderType(llvm::Module &module) {
   };
   // clang-format on
 
-  auto existing_type_ptr = module.getTypeByName(kEventHeaderTypeName);
+  auto existing_type_ptr = getTypeByName(module, kEventHeaderTypeName);
   if (existing_type_ptr != nullptr) {
     return StringError::create("A type named " + kEventHeaderTypeName +
                                " is already defined");
@@ -871,7 +872,7 @@ FunctionTracer::createEventDataType(llvm::Module &module,
     }
   }
 
-  auto existing_type_ptr = module.getTypeByName(kEventDataTypeName);
+  auto existing_type_ptr = getTypeByName(module, kEventDataTypeName);
   if (existing_type_ptr != nullptr) {
     return StringError::create("A type named " + kEventDataTypeName +
                                " is already defined");
@@ -888,14 +889,14 @@ FunctionTracer::createEventDataType(llvm::Module &module,
 }
 
 SuccessOrStringError FunctionTracer::createEventType(llvm::Module &module) {
-  auto event_header_type = module.getTypeByName(kEventHeaderTypeName);
+  auto event_header_type = getTypeByName(module, kEventHeaderTypeName);
   if (event_header_type == nullptr) {
     return StringError::create("The event header type is not defined");
   }
 
   std::vector<llvm::Type *> type_list = {event_header_type};
 
-  auto event_data_type = module.getTypeByName(kEventDataTypeName);
+  auto event_data_type = getTypeByName(module, kEventDataTypeName);
   if (event_data_type != nullptr) {
     type_list.push_back(event_data_type);
   }
@@ -913,7 +914,7 @@ StringErrorOr<FunctionTracer::EventMap::Ref>
 FunctionTracer::createEventMap(llvm::Module &module,
                                std::size_t event_map_size) {
 
-  auto event_type = module.getTypeByName(kEventTypeName);
+  auto event_type = getTypeByName(module, kEventTypeName);
   if (event_type == nullptr) {
     return StringError::create("The event type is not defined");
   }
@@ -925,7 +926,7 @@ FunctionTracer::createEventMap(llvm::Module &module,
 StringErrorOr<FunctionTracer::EventScratchSpace::Ref>
 FunctionTracer::createEventScratchSpace(llvm::Module &module) {
 
-  auto event_type = module.getTypeByName(kEventTypeName);
+  auto event_type = getTypeByName(module, kEventTypeName);
   if (event_type == nullptr) {
     return StringError::create("The event type is not defined");
   }
@@ -1158,7 +1159,7 @@ SuccessOrStringError FunctionTracer::createEnterFunction(
 
   // Create the function
   auto function_param_type =
-      module.getTypeByName(kEnterFunctionParameterTypeName);
+      getTypeByName(module, kEnterFunctionParameterTypeName);
 
   if (function_param_type == nullptr) {
     return StringError::create("The " + kEnterFunctionParameterTypeName +
@@ -1199,7 +1200,7 @@ SuccessOrStringError FunctionTracer::createEnterFunction(
   StackAllocationList stack_allocation_list;
 
   if (enter_event.type() == ebpf::IPerfEvent::Type::Kprobe) {
-    auto args_type = module.getTypeByName(kEnterFunctionParameterTypeName);
+    auto args_type = getTypeByName(module, kEnterFunctionParameterTypeName);
 
     auto success_exp = allocateStackSpace(stack_allocation_list, "pt_regs",
                                           builder, args_type);
@@ -1258,7 +1259,7 @@ SuccessOrStringError FunctionTracer::createEnterFunction(
   }
 
   // Acquire the event scratch space
-  auto event_type = module.getTypeByName(kEventTypeName);
+  auto event_type = getTypeByName(module, kEventTypeName);
   if (event_type == nullptr) {
     return StringError::create("The " + kEventTypeName +
                                " type is not defined");
@@ -1348,7 +1349,7 @@ SuccessOrStringError FunctionTracer::generateEventHeader(
       event_object, {builder.getInt32(0), builder.getInt32(0)});
 
   // Event object size, including the size field itself
-  auto event_type = module.getTypeByName(kEventTypeName);
+  auto event_type = getTypeByName(module, kEventTypeName);
   if (event_type == nullptr) {
     return StringError::create("The type " + kEventTypeName +
                                " is not defined");
@@ -1660,7 +1661,7 @@ SuccessOrStringError FunctionTracer::createExitFunction(
 
   // Create the function
   auto function_param_type =
-      module.getTypeByName(kExitFunctionParameterTypeName);
+      getTypeByName(module, kExitFunctionParameterTypeName);
 
   if (function_param_type == nullptr) {
     return StringError::create("The " + kExitFunctionParameterTypeName +
@@ -1736,7 +1737,7 @@ SuccessOrStringError FunctionTracer::createExitFunction(
   builder.CreateStore(event_key_value, event_key);
 
   // Acquire the event object stored by the entry program
-  auto event_type = module.getTypeByName(kEventTypeName);
+  auto event_type = getTypeByName(module, kEventTypeName);
   if (event_type == nullptr) {
     return StringError::create("The " + kEventTypeName +
                                " type is not defined");
