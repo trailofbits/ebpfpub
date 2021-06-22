@@ -1,5 +1,6 @@
 #include "forknamespacehelper.h"
 #include "functiontracer.h"
+#include "llvm_compat.h"
 
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/Verifier.h>
@@ -180,7 +181,8 @@ SuccessOrStringError ForkNamespaceHelper::generateFunction(llvm::Module &module,
   // Create the function
   auto &llvm_context = module.getContext();
 
-  auto function_param_type = module.getTypeByName(kTracepointParameterTypeName);
+  auto function_param_type =
+      getTypeByName(module, kTracepointParameterTypeName);
   if (function_param_type == nullptr) {
     return StringError::create("The function argument type is not defined");
   }
@@ -233,7 +235,7 @@ SuccessOrStringError ForkNamespaceHelper::generateFunction(llvm::Module &module,
   auto child_pid_64 = builder.CreateZExt(child_pid, builder.getInt64Ty());
 
   // Go through each event map we received to update the event headers
-  auto event_header_type = module.getTypeByName("EventHeader");
+  auto event_header_type = getTypeByName(module, "EventHeader");
   if (event_header_type == nullptr) {
     return StringError::create("The event header type is not defined");
   }

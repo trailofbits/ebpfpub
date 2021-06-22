@@ -36,6 +36,9 @@ function(ebpfpub)
 
     src/tracepointserializers.h
     src/tracepointserializers.cpp
+
+    src/llvm_compat.h
+    src/llvm_compat.cpp
   )
 
   target_include_directories(ebpfpub
@@ -58,6 +61,7 @@ function(ebpfpub)
 
   target_compile_definitions(ebpfpub PUBLIC
     EBPFPUB_VERSION="${EBPFPUB_VERSION}"
+    LLVM_MAJOR_VERSION="${LLVM_MAJOR_VERSION}"
   )
 
   if(EBPFPUB_ENABLE_INSTALL)
