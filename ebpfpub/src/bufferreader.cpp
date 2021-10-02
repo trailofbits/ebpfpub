@@ -106,6 +106,10 @@ std::uint64_t BufferReader::peekU64(std::size_t offset) {
 std::size_t BufferReader::bytesRead() const { return d->bytes_read; }
 
 std::size_t BufferReader::availableBytes() const {
+  if (d->bytes_read >= d->buffer_size) {
+    return 0;
+  }
+
   return d->buffer_size - d->bytes_read;
 }
 
