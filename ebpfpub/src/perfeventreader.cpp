@@ -62,7 +62,7 @@ SuccessOrStringError PerfEventReader::exec(const std::chrono::seconds &timeout,
 
   try {
     for (;;) {
-      if (d->buffer_reader->availableBytes() <= 8U) {
+      if (d->buffer_reader->availableBytes() <= 12U) {
         ++error_counters.invalid_probe_output;
         break;
       }
