@@ -2084,7 +2084,6 @@ StringErrorOr<FunctionTracer::EventList> FunctionTracer::parseEventData(
     // If this is the first iteration, the event size/identifier must match
     // what we need, since the PerfEventReader expects us to always parse
     // at least one event
-
     if (buffer_reader.availableBytes() == 0U) {
       if (first_event_object) {
         return StringError::create("Empty event buffer received");
@@ -2329,7 +2328,10 @@ StringErrorOr<FunctionTracer::EventList> FunctionTracer::parseEventData(
       }
     }
 
-    buffer_reader.skipBytes(highest_offset_read + 8U);
+    if (!param_list_index.empty()) {
+      buffer_reader.skipBytes(highest_offset_read + 8U);
+    }
+
     output.push_back(std::move(event));
   }
 
