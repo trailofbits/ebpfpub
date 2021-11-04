@@ -86,9 +86,10 @@ public:
       std::size_t event_map_size, OptionalPidList excluded_processes = {});
 
   static StringErrorOr<IFunctionTracer::Ref> createFromKprobe(
-      const std::string &name, const ParameterList &parameter_list,
-      IBufferStorage &buffer_storage, ebpf::PerfEventArray &perf_event_array,
-      std::size_t event_map_size, OptionalPidList excluded_processes = {});
+      const std::string &name, bool is_syscall,
+      const ParameterList &parameter_list, IBufferStorage &buffer_storage,
+      ebpf::PerfEventArray &perf_event_array, std::size_t event_map_size,
+      OptionalPidList excluded_processes = {});
 
   static StringErrorOr<IFunctionTracer::Ref> createFromUprobe(
       const std::string &name, const std::string &path,
