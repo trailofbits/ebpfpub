@@ -1199,7 +1199,7 @@ SuccessOrStringError FunctionTracer::createEnterFunction(
   // Allocate the required stack space
   StackAllocationList stack_allocation_list;
 
-  if (enter_event.type() == ebpf::IPerfEvent::Type::Kprobe) {
+  if (enter_event.isKprobeSyscall() && enter_event.useKprobeIndirectPtRegs()) {
     auto args_type = getTypeByName(module, kEnterFunctionParameterTypeName);
 
     auto success_exp = allocateStackSpace(stack_allocation_list, "pt_regs",
@@ -1441,7 +1441,7 @@ SuccessOrStringError FunctionTracer::generateEnterEventData(
 
   llvm::Value *args_data = current_function->arg_begin();
 
-  if (enter_event.type() == ebpf::IPerfEvent::Type::Kprobe) {
+  if (enter_event.isKprobeSyscall() && enter_event.useKprobeIndirectPtRegs()) {
     // The real pt_regs is pointed to by the first argument
     auto first_arg_index_exp = translateParameterNumberToPtregsIndex(0);
     if (!first_arg_index_exp.succeeded()) {

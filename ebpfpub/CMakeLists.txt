@@ -37,6 +37,9 @@ function(ebpfpub)
     src/tracepointserializers.h
     src/tracepointserializers.cpp
 
+    src/kallsymsparser.h
+    src/kallsymsparser.cpp
+
     src/llvm_compat.h
     src/llvm_compat.cpp
   )
@@ -93,6 +96,10 @@ function(ebpfpub)
       TARGETS ebpfpub
       DESTINATION "lib"
     )
+  endif()
+
+  if(EBPFPUB_ENABLE_TESTS)
+    add_subdirectory("tests")
   endif()
 endfunction()
 

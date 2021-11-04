@@ -170,20 +170,6 @@ void eventParser(
   }
 }
 
-std::string getKprobeName(const std::string &syscall_name) {
-#ifdef __aarch64__
-  static const std::string kSyscallPrefix{"__arm64_sys_"};
-
-#elif __amd64__
-  static const std::string kSyscallPrefix{"__x64_sys_"};
-
-#else
-#error Unsupported architecture
-#endif
-
-  return kSyscallPrefix + syscall_name;
-}
-
 int main(int argc, char *argv[]) {
   setRlimit();
 
@@ -214,7 +200,21 @@ int main(int argc, char *argv[]) {
   auto perf_event_reader = perf_event_reader_exp.takeValue();
 
   auto function_tracer_exp = tob::ebpfpub::IFunctionTracer::createFromKprobe(
-      getKprobeName("execveat"), kExecveatParameterList, *buffer_storage.get(),
+      "execveat", true, kExecveatParameterList, *buffer_storage.get(),
+      *perf_event_array.get(), 1024);
+
+  if (!function_tracer_exp.succeeded()) {
+    std::cerr << "Failed to create the function tracer: "
+              << function_tracer_exp.error().message()
+              << ". Ignoring this system call...\n";
+
+  } else {
+    auto function_tracer = function_tracer_exp.takeValue();
+    perf_event_reader->insert(std::move(function_tracer));
+  }
+
+  function_tracer_exp = tob::ebpfpub::IFunctionTracer::createFromKprobe(
+      "execve", true, kExecveParameterList, *buffer_storage.get(),
       *perf_event_array.get(), 1024);
 
   if (!function_tracer_exp.succeeded()) {
@@ -223,18 +223,6 @@ int main(int argc, char *argv[]) {
   }
 
   auto function_tracer = function_tracer_exp.takeValue();
-  perf_event_reader->insert(std::move(function_tracer));
-
-  function_tracer_exp = tob::ebpfpub::IFunctionTracer::createFromKprobe(
-      getKprobeName("execve"), kExecveParameterList, *buffer_storage.get(),
-      *perf_event_array.get(), 1024);
-
-  if (!function_tracer_exp.succeeded()) {
-    throw std::runtime_error("Failed to create the function tracer: " +
-                             function_tracer_exp.error().message());
-  }
-
-  function_tracer = function_tracer_exp.takeValue();
   perf_event_reader->insert(std::move(function_tracer));
 
   while (true) {

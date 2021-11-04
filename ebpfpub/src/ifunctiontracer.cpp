@@ -7,11 +7,18 @@
 */
 
 #include "functiontracer.h"
+#include "kallsymsparser.h"
 #include "tracepointserializers.h"
 
 #include <tob/ebpf/iperfevent.h>
 
 namespace tob::ebpfpub {
+
+namespace {
+
+const std::string kKallsymsPath{"/proc/kallsyms"};
+}
+
 StringErrorOr<IFunctionTracer::Ref>
 IFunctionTracer::createFromSyscallTracepoint(
     const std::string &name, IBufferStorage &buffer_storage,
@@ -68,13 +75,36 @@ IFunctionTracer::createFromSyscallTracepoint(
 }
 
 StringErrorOr<IFunctionTracer::Ref> IFunctionTracer::createFromKprobe(
-    const std::string &name, const ParameterList &parameter_list,
-    IBufferStorage &buffer_storage, ebpf::PerfEventArray &perf_event_array,
-    std::size_t event_map_size, OptionalPidList excluded_processes) {
+    const std::string &name, bool is_syscall,
+    const ParameterList &parameter_list, IBufferStorage &buffer_storage,
+    ebpf::PerfEventArray &perf_event_array, std::size_t event_map_size,
+    OptionalPidList excluded_processes) {
 
   try {
+    auto resolved_name{name};
+
+    if (is_syscall) {
+      auto kallsyms_parser_exp = KallsymsParser::create(kKallsymsPath);
+      if (!kallsyms_parser_exp.succeeded()) {
+        throw kallsyms_parser_exp.error();
+      }
+
+      auto kallsyms_parser = kallsyms_parser_exp.takeValue();
+
+      if (kallsyms_parser->contains("sys_bpf")) {
+        resolved_name = "sys_" + name;
+
+      } else if (kallsyms_parser->contains("__x64_sys_bpf")) {
+        resolved_name = "__x64_sys_" + name;
+
+      } else if (kallsyms_parser->contains("__arm64_sys_bpf")) {
+        resolved_name = "__arm64_sys_" + name;
+      }
+    }
+
     // Create the enter event
-    auto event_exp = ebpf::IPerfEvent::createKprobe(name, false);
+    auto event_exp =
+        ebpf::IPerfEvent::createKprobe(resolved_name, is_syscall, false);
     if (!event_exp.succeeded()) {
       return event_exp.error();
     }
@@ -82,7 +112,7 @@ StringErrorOr<IFunctionTracer::Ref> IFunctionTracer::createFromKprobe(
     auto enter_event = event_exp.takeValue();
 
     // Create the exit event
-    event_exp = ebpf::IPerfEvent::createKprobe(name, true);
+    event_exp = ebpf::IPerfEvent::createKprobe(resolved_name, is_syscall, true);
     if (!event_exp.succeeded()) {
       return event_exp.error();
     }
@@ -90,9 +120,10 @@ StringErrorOr<IFunctionTracer::Ref> IFunctionTracer::createFromKprobe(
     auto exit_event = event_exp.takeValue();
 
     // Create the function tracer using the events we obtained
-    return Ref(new FunctionTracer(
-        name, parameter_list, event_map_size, buffer_storage, perf_event_array,
-        std::move(enter_event), std::move(exit_event), excluded_processes));
+    return Ref(new FunctionTracer(resolved_name, parameter_list, event_map_size,
+                                  buffer_storage, perf_event_array,
+                                  std::move(enter_event), std::move(exit_event),
+                                  excluded_processes));
 
   } catch (const std::bad_alloc &) {
     return StringError::create("Memory allocation failure");
