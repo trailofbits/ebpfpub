@@ -22,6 +22,7 @@
 #include <tob/ebpf/iperfevent.h>
 #include <tob/ebpf/llvm_utils.h>
 #include <tob/ebpf/tracepointdescriptor.h>
+#include <tob/utils/kernel.h>
 
 namespace tob::ebpfpub {
 namespace {
@@ -1392,11 +1393,32 @@ SuccessOrStringError FunctionTracer::generateEventHeader(
   builder.CreateStore(uid_gid, event_header_field);
 
   // cgroup id
+  auto kernel_version_exp = utils::getKernelVersion();
+  if (!kernel_version_exp.succeeded()) {
+    return kernel_version_exp.error();
+  }
+
+  auto kernel_version = kernel_version_exp.takeValue();
+
+  bool has_cgroups_vmcall{false};
+  if (kernel_version.major <= 3) {
+    has_cgroups_vmcall = false;
+  } else if (kernel_version.major == 4) {
+    has_cgroups_vmcall = kernel_version.minor >= 18;
+  } else {
+    has_cgroups_vmcall = true;
+  }
+
   event_header_field = builder.CreateGEP(
       event_header, {builder.getInt32(0U), builder.getInt32(5U)});
 
-  auto cgroup_id = bpf_syscall_interface.getCurrentCgroupId();
-  builder.CreateStore(cgroup_id, event_header_field);
+  if (has_cgroups_vmcall) {
+    auto cgroup_id = bpf_syscall_interface.getCurrentCgroupId();
+    builder.CreateStore(cgroup_id, event_header_field);
+
+  } else {
+    builder.CreateStore(builder.getInt64(0), event_header_field);
+  }
 
   // Exit code (initialize to zero)
   event_header_field = builder.CreateGEP(
