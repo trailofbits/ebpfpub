@@ -96,7 +96,7 @@ jobs:
         ( cd build && ninja -v )
 
     - name: Run the ebpf-common tests
-      run: ( cd build && ninja -v run-ebpf-common-tests )
+      run: ( cd build && sudo ninja -v run-ebpf-common-tests )
 
     - name: Run the ebpfpub tests
       run: ( cd build && ninja -v run-ebpfpub-tests )
