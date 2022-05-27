@@ -7,12 +7,12 @@
 */
 
 #include "perfeventreader.h"
-#include "bufferreader.h"
 #include "functiontracer.h"
 
 #include <unordered_map>
 #include <vector>
 
+#include <tob/ebpf/bufferreader.h>
 #include <tob/ebpf/perfeventarray.h>
 
 namespace tob::ebpfpub {
@@ -21,7 +21,7 @@ struct PerfEventReader::PrivateData final {
       : perf_event_array(perf_event_array_) {}
 
   ebpf::PerfEventArray &perf_event_array;
-  BufferReader::Ref buffer_reader;
+  ebpf::BufferReader::Ptr buffer_reader;
 
   std::unordered_map<std::uint64_t, IFunctionTracer::Ref> function_tracer_map;
 };
@@ -38,69 +38,66 @@ SuccessOrStringError PerfEventReader::exec(const std::chrono::seconds &timeout,
                                            Callback callback) {
 
   ErrorCounters error_counters = {};
-  std::vector<std::uint8_t> event_buffer;
+  ebpf::PerfEventArray::BufferList event_buffer_list;
 
-  if (!d->perf_event_array.read(event_buffer,
+  if (!d->perf_event_array.read(event_buffer_list,
                                 error_counters.invalid_probe_output,
                                 error_counters.lost_events, timeout)) {
 
     return StringError::create("Failed to read from the perf event array");
   }
 
-  if (event_buffer.empty()) {
-    // If any error has occurred, call the callback to forward the counters
-    if (error_counters.invalid_probe_output != 0U ||
-        error_counters.lost_events != 0U) {
+  for (const auto &event_buffer : event_buffer_list) {
+    d->buffer_reader->reset(event_buffer);
+    d->buffer_reader->skipBytes(ebpf::kPerfEventHeaderSize +
+                                sizeof(std::uint32_t));
 
-      callback({}, error_counters);
+    try {
+      for (;;) {
+        if (d->buffer_reader->availableBytes() <= 12U) {
+          ++error_counters.invalid_probe_output;
+          break;
+        }
+
+        auto event_entry_size = d->buffer_reader->peekU32(0U);
+        auto event_identifier = d->buffer_reader->peekU64(4U);
+
+        if (event_entry_size > d->buffer_reader->availableBytes()) {
+          ++error_counters.invalid_probe_output;
+          break;
+        }
+
+        auto function_tracer_it = d->function_tracer_map.find(event_identifier);
+        if (function_tracer_it == d->function_tracer_map.end()) {
+          d->buffer_reader->skipBytes(event_entry_size);
+          ++error_counters.invalid_event;
+          break;
+        }
+
+        auto &tracer =
+            *static_cast<FunctionTracer *>(function_tracer_it->second.get());
+
+        auto event_list_exp = tracer.parseEventData(*d->buffer_reader.get());
+        if (!event_list_exp.succeeded()) {
+          ++error_counters.invalid_event_data;
+          break;
+        }
+
+        auto event_list = event_list_exp.takeValue();
+        callback(event_list, error_counters);
+
+        if (d->buffer_reader->availableBytes() == 0U) {
+          break;
+        }
+      }
+
+    } catch (const ebpf::BufferReader::ReadError &) {
+      ++error_counters.invalid_event_data;
     }
-
-    return {};
   }
 
-  d->buffer_reader->reset(event_buffer);
-
-  try {
-    for (;;) {
-      if (d->buffer_reader->availableBytes() <= 12U) {
-        ++error_counters.invalid_probe_output;
-        break;
-      }
-
-      auto event_entry_size = d->buffer_reader->peekU32(0U);
-      auto event_identifier = d->buffer_reader->peekU64(4U);
-
-      if (event_entry_size > d->buffer_reader->availableBytes()) {
-        ++error_counters.invalid_probe_output;
-        break;
-      }
-
-      auto function_tracer_it = d->function_tracer_map.find(event_identifier);
-      if (function_tracer_it == d->function_tracer_map.end()) {
-        d->buffer_reader->skipBytes(event_entry_size);
-        ++error_counters.invalid_event;
-        break;
-      }
-
-      auto &tracer =
-          *static_cast<FunctionTracer *>(function_tracer_it->second.get());
-
-      auto event_list_exp = tracer.parseEventData(*d->buffer_reader.get());
-      if (!event_list_exp.succeeded()) {
-        ++error_counters.invalid_event_data;
-        break;
-      }
-
-      auto event_list = event_list_exp.takeValue();
-      callback(event_list, error_counters);
-
-      if (d->buffer_reader->availableBytes() == 0U) {
-        break;
-      }
-    }
-
-  } catch (const BufferReader::ReadError &) {
-    ++error_counters.invalid_event_data;
+  if (error_counters.invalid_probe_output != 0U ||
+      error_counters.lost_events != 0U) {
     callback({}, error_counters);
   }
 
@@ -110,7 +107,7 @@ SuccessOrStringError PerfEventReader::exec(const std::chrono::seconds &timeout,
 PerfEventReader::PerfEventReader(ebpf::PerfEventArray &perf_event_array)
     : d(new PrivateData(perf_event_array)) {
 
-  auto buffer_reader_exp = BufferReader::create();
+  auto buffer_reader_exp = ebpf::BufferReader::create();
   if (!buffer_reader_exp.succeeded()) {
     throw buffer_reader_exp.error();
   }

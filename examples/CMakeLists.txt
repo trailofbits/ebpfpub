@@ -6,22 +6,16 @@
 # the LICENSE file found in the root directory of this source tree.
 #
 
-cmake_minimum_required(VERSION 3.14.6)
+if(EBPFPUB_BUILD_EXAMPLES)
+  message(STATUS "ebpfpub - Examples are being built")
 
-function(ebpfpubExamples)
-  if(EBPFPUB_BUILD_EXAMPLES)
-    message(STATUS "ebpfpub - Examples are being built")
+  add_subdirectory("socketevents")
+  add_subdirectory("execsnoop")
+  add_subdirectory("readline_trace")
+  add_subdirectory("kprobe_execsnoop")
+endif()
 
-    add_subdirectory("socketevents")
-    add_subdirectory("execsnoop")
-    add_subdirectory("readline_trace")
-    add_subdirectory("kprobe_execsnoop")
-  endif()
-
-  if(EBFPPUB_BUILD_SOCKETMONITOR_EXAMPLE)
-    message(STATUS "ebpfpub - The SocketMonitor example is being built")
-    add_subdirectory("SocketMonitor")
-  endif()
-endfunction()
-
-ebpfpubExamples()
+if(EBFPPUB_BUILD_SOCKETMONITOR_EXAMPLE)
+  message(STATUS "ebpfpub - The SocketMonitor example is being built")
+  add_subdirectory("SocketMonitor")
+endif()

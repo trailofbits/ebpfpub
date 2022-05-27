@@ -6,5 +6,5 @@
   the LICENSE file found in the root directory of this source tree.
 */
 
-#define CATCH_CONFIG_MAIN
-#include <catch2/catch.hpp>
+#define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
+#include <doctest/doctest.h>

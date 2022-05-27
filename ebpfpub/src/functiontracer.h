@@ -8,11 +8,10 @@
 
 #pragma once
 
-#include "bufferreader.h"
-
 #include <ebpfpub/ifunctiontracer.h>
 
 #include <tob/ebpf/bpfsyscallinterface.h>
+#include <tob/ebpf/bufferreader.h>
 #include <tob/ebpf/iperfevent.h>
 
 namespace tob::ebpfpub {
@@ -36,7 +35,8 @@ public:
 
   virtual std::string ir() const override;
 
-  StringErrorOr<EventList> parseEventData(BufferReader &buffer_reader) const;
+  StringErrorOr<EventList>
+  parseEventData(ebpf::BufferReader &buffer_reader) const;
 
 private:
   struct PrivateData;
@@ -169,13 +169,12 @@ public:
                           const Parameter &param, llvm::Value *event_data_field,
                           llvm::Value *probe_error_flag);
 
-  static StringErrorOr<EventList>
-  parseEventData(BufferReader &buffer_reader, std::uint32_t event_object_size,
-                 std::uint64_t event_object_identifier,
-                 const std::string &event_name,
-                 const ParameterList &parameter_list,
-                 const ParameterListIndex &param_list_index,
-                 IBufferStorage &buffer_storage);
+  static StringErrorOr<EventList> parseEventData(
+      ebpf::BufferReader &buffer_reader, std::uint32_t event_object_size,
+      std::uint64_t event_object_identifier, const std::string &event_name,
+      const ParameterList &parameter_list,
+      const ParameterListIndex &param_list_index,
+      IBufferStorage &buffer_storage);
 
   static SuccessOrStringError captureString(
       llvm::IRBuilder<> &builder,

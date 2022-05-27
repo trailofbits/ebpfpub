@@ -12,7 +12,7 @@
 #include <sstream>
 #include <unordered_set>
 
-#include <tob/error/error.h>
+#include <tob/error/stringerror.h>
 
 namespace tob::ebpfpub {
 

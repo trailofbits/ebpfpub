@@ -59,17 +59,20 @@ function(ebpfpubPackageGenerator)
 
   install(
     FILES
-      "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/ebpf/types.h"
-      "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/ebpf/sectionmemorymanager.h"
-      "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/ebpf/bpfmap.h"
-      "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/ebpf/bpfsyscallinterface.h"
       "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/ebpf/structure.h"
+      "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/ebpf/sectionmemorymanager.h"
       "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/ebpf/ebpf_utils.h"
-      "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/ebpf/typedbpfmap.h"
-      "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/ebpf/llvm_utils.h"
-      "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/ebpf/perfeventarray.h"
-      "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/ebpf/tracepointdescriptor.h"
       "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/ebpf/iperfevent.h"
+      "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/ebpf/perfeventarray.h"
+      "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/ebpf/bufferreader.h"
+      "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/ebpf/bpfsyscallinterface.h"
+      "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/ebpf/llvm_utils.h"
+      "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/ebpf/cpu.h"
+      "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/ebpf/types.h"
+      "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/ebpf/illvmbridge.h"
+      "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/ebpf/bpfmap.h"
+      "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/ebpf/tracepointdescriptor.h"
+      "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/ebpf/typedbpfmap.h"
 
     DESTINATION
       "include/tob/ebpf"
@@ -78,11 +81,11 @@ function(ebpfpubPackageGenerator)
 
   install(
     FILES
-      "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/error/errorcode.h"
-      "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/error/erroror.h"
-      "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/error/error.h"
-      "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/error/successor.h"
       "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/error/stringerror.h"
+      "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/error/erroror.h"
+      "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/error/namederror.h"
+      "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/error/errorstatus.h"
+      "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/error/successor.h"
 
     DESTINATION
       "include/tob/error"
@@ -90,11 +93,12 @@ function(ebpfpubPackageGenerator)
 
   install(
     FILES
-      "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/utils/ielfimage.h"
       "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/utils/uniquefd.h"
+      "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/utils/architecture.h"
+      "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/utils/kernel.h"
       "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/utils/uniqueref.h"
       "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/utils/uniquemappedmemory.h"
-      "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/utils/architecture.h"
+      "${EBPFPUB_INSTALL_PATH}/usr/local/include/tob/utils/ielfimage.h"
 
     DESTINATION
       "include/tob/utils"

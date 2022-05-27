@@ -6,12 +6,12 @@
   the LICENSE file found in the root directory of this source tree.
 */
 
-#include <catch2/catch.hpp>
+#include <doctest/doctest.h>
 
 #include "kallsymsparser.h"
 
 namespace tob::ebpfpub {
-SCENARIO("kallsyms parser", "[KallsymsParser]") {
+SCENARIO("kallsyms parser") {
   GIVEN("a list of symbols") {
     // clang-format off
     const std::string kKallsymsExample = 
