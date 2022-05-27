@@ -42,11 +42,10 @@ tar -xf /tmp/ebpfpub/build/osquery-toolchain-1.1.0-x86_64.tar.xz -C /opt
 1. Obtain the source code: `git clone --recursive https://github.com/trailofbits/ebpfpub`
 2. If you cloned the repo without the `--recursive` flag, run `git submodule update --init --recursive`
 3. Enter the source folder: `cd ebpfpub`
-4. Create and enter the build folder: `mkdir build && cd build`
-5. Configure the project: `cmake -DCMAKE_BUILD_TYPE:STRING=RelWithDebInfo -DEBPF_COMMON_TOOLCHAIN_PATH:PATH=/opt/osquery-toolchain -DEBPFPUB_ENABLE_INSTALL:BOOL=true -DEBPFPUB_ENABLE_EXAMPLES:BOOL=true -DEBPF_COMMON_ENABLE_TESTS:BOOL=true ..`
-(remove `-DEBPF_COMMON_TOOLCHAIN_PATH:PATH=/opt/osquery-toolchain` if you are building with the system toolchain)
-6. Build the project: `cmake --build . -j $(($(nproc) + 1))`
-7. Run the tests: `cmake --build . --target run-ebpf-common-tests`
+4. If you intend to build the project using the osquery-toolchain: `export TOOLCHAIN_PATH="/opt/osquery-toolchain"`, then add `-DCMAKE_TOOLCHAIN_FILE=cmake/toolchain.cmake` to step 6
+5. Configure the project: `cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DEBPFPUB_ENABLE_INSTALL=true -DEBPFPUB_ENABLE_EXAMPLES=true -DEBPF_COMMON_ENABLE_TESTS=true`
+6. Build the project: `cmake --build build -j $(($(nproc) + 1))`
+7. Run the tests: `cmake --build build --target run-ebpf-common-tests`
 
 ## Building the package
 
