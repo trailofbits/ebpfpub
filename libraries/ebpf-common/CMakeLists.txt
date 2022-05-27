@@ -6,10 +6,4 @@
 # the LICENSE file found in the root directory of this source tree.
 #
 
-cmake_minimum_required(VERSION 3.14.6)
-
-function(ebpfpubLibrariesEbpfCommon)
-  add_subdirectory("src")
-endfunction()
-
-ebpfpubLibrariesEbpfCommon()
+add_subdirectory("src")

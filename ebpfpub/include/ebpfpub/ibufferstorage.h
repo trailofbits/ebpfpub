@@ -12,7 +12,7 @@
 #include <unordered_map>
 
 #include <tob/ebpf/bpfmap.h>
-#include <tob/error/error.h>
+#include <tob/error/stringerror.h>
 
 namespace tob::ebpfpub {
 class IBufferStorage {

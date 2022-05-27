@@ -6,27 +6,23 @@
 # the LICENSE file found in the root directory of this source tree.
 #
 
-function(generateEbpfpubTests)
-  add_executable(ebpfpub-tests
-    src/main.cpp
-    src/kallsymsparser.cpp
-  )
+add_executable("ebpfpub-tests"
+  src/main.cpp
+  src/kallsymsparser.cpp
+)
 
-  target_link_libraries(ebpfpub-tests PRIVATE
-    cxx_target_settings
-    thirdparty_catch2
-    ebpfpub
-    error
-  )
+target_link_libraries("ebpfpub-tests" PRIVATE
+  "ebpfpub_cxx_settings"
+  "ebpfpub"
+  "error"
+  "external::doctest"
+)
 
-  target_include_directories(ebpfpub-tests PRIVATE
-    "${CMAKE_CURRENT_SOURCE_DIR}/../src"
-  )
+target_include_directories("ebpfpub-tests" PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../src"
+)
 
-  add_custom_target(run-ebpfpub-tests
-    COMMAND "$<TARGET_FILE:ebpfpub-tests>"
-    COMMENT "Running ebpfpub tests"
-  )
-endfunction()
-
-generateEbpfpubTests()
+add_custom_target("run-ebpfpub-tests"
+  COMMAND "$<TARGET_FILE:ebpfpub-tests>"
+  COMMENT "Running ebpfpub tests"
+)

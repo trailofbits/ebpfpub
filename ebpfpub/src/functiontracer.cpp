@@ -94,7 +94,7 @@ std::uint64_t FunctionTracer::eventIdentifier() const {
 std::string FunctionTracer::ir() const { return d->module_ir; }
 
 StringErrorOr<FunctionTracer::EventList>
-FunctionTracer::parseEventData(BufferReader &buffer_reader) const {
+FunctionTracer::parseEventData(ebpf::BufferReader &buffer_reader) const {
 
   auto event_object_size =
       static_cast<std::uint32_t>(d->event_map->valueSize());
@@ -920,7 +920,7 @@ FunctionTracer::createEventMap(llvm::Module &module,
     return StringError::create("The event type is not defined");
   }
 
-  auto event_type_size = ebpf::getLLVMStructureSize(event_type, &module);
+  auto event_type_size = ebpf::getTypeSize(module, event_type);
   return EventMap::create(event_type_size, event_map_size);
 }
 
@@ -932,7 +932,7 @@ FunctionTracer::createEventScratchSpace(llvm::Module &module) {
     return StringError::create("The event type is not defined");
   }
 
-  auto event_type_size = ebpf::getLLVMStructureSize(event_type, &module);
+  auto event_type_size = ebpf::getTypeSize(module, event_type);
   return EventScratchSpace::create(event_type_size, 1U);
 }
 
@@ -1356,8 +1356,8 @@ SuccessOrStringError FunctionTracer::generateEventHeader(
                                " is not defined");
   }
 
-  auto event_object_size = static_cast<std::uint32_t>(
-      ebpf::getLLVMStructureSize(event_type, &module));
+  auto event_object_size =
+      static_cast<std::uint32_t>(ebpf::getTypeSize(module, event_type));
 
   auto event_header_field = builder.CreateGEP(
       event_header, {builder.getInt32(0U), builder.getInt32(0U)});
@@ -1889,8 +1889,8 @@ SuccessOrStringError FunctionTracer::createExitFunction(
   // Send the data through perf_event
   auto perf_event_fd = perf_event_array.fd();
 
-  auto event_entry_size = static_cast<std::uint32_t>(
-      ebpf::getLLVMStructureSize(event_type, &module));
+  auto event_entry_size =
+      static_cast<std::uint32_t>(ebpf::getTypeSize(module, event_type));
 
   bpf_syscall_interface->perfEventOutput(exit_function_args, perf_event_fd,
                                          event_entry, event_entry_size);
@@ -2093,7 +2093,7 @@ void FunctionTracer::captureIntegerByPointer(
 }
 
 StringErrorOr<FunctionTracer::EventList> FunctionTracer::parseEventData(
-    BufferReader &buffer_reader, std::uint32_t event_object_size,
+    ebpf::BufferReader &buffer_reader, std::uint32_t event_object_size,
     std::uint64_t event_object_identifier, const std::string &event_name,
     const ParameterList &parameter_list,
     const ParameterListIndex &param_list_index,

@@ -6,19 +6,13 @@
 # the LICENSE file found in the root directory of this source tree.
 #
 
-cmake_minimum_required(VERSION 3.14.6)
-
-# This directory also takes care of the toolchain configuration
-# so we have to include it before our project() declaration
-add_subdirectory("libraries")
-
+cmake_minimum_required(VERSION 3.22.1)
 project("ebpfpub")
+
 include("cmake/options.cmake")
 include("cmake/version.cmake")
+include("cmake/settings.cmake")
 
-function(ebpfpubMain)
-  add_subdirectory("ebpfpub")
-  add_subdirectory("examples")
-endfunction()
-
-ebpfpubMain()
+add_subdirectory("libraries")
+add_subdirectory("ebpfpub")
+add_subdirectory("examples")

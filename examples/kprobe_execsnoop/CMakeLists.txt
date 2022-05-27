@@ -6,18 +6,11 @@
 # the LICENSE file found in the root directory of this source tree.
 #
 
-cmake_minimum_required(VERSION 3.14.6)
-project("kprobe_execsnoop")
+add_executable("kprobe_execsnoop"
+  src/main.cpp
+)
 
-function(ebpfpubExamplesKprobeExecsnoop)
-  add_executable("${PROJECT_NAME}"
-    src/main.cpp
-  )
-
-  target_link_libraries("${PROJECT_NAME}" PRIVATE
-    cxx_target_settings
-    ebpfpub
-  )
-endfunction()
-
-ebpfpubExamplesKprobeExecsnoop()
+target_link_libraries("kprobe_execsnoop" PRIVATE
+  "ebpfpub_cxx_settings"
+  "ebpfpub"
+)

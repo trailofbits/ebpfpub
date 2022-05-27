@@ -12,7 +12,7 @@
 
 #include <llvm/IR/Module.h>
 
-#include <tob/error/error.h>
+#include <tob/error/stringerror.h>
 
 namespace tob::ebpfpub {
 class ForkNamespaceHelper final {

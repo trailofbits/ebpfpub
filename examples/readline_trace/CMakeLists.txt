@@ -6,19 +6,11 @@
 # the LICENSE file found in the root directory of this source tree.
 #
 
-cmake_minimum_required(VERSION 3.14.6)
-project("readline_trace")
+add_executable("readline_trace"
+  src/main.cpp
+)
 
-function(ebpfpubExamplesReadlineTrace)
-  add_executable("${PROJECT_NAME}"
-    src/main.cpp
-  )
-
-  target_link_libraries("${PROJECT_NAME}" PRIVATE
-    cxx_target_settings
-    ebpfpub
-  )
-endfunction()
-
-ebpfpubExamplesReadlineTrace()
-
+target_link_libraries("readline_trace" PRIVATE
+  "ebpfpub_cxx_settings"
+  "ebpfpub"
+)

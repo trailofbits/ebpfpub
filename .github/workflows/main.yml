@@ -29,7 +29,7 @@ jobs:
 
     - name: Select the CMake version
       id: cmake_version
-      run: echo ::set-output name=VALUE::3.16.4
+      run: echo ::set-output name=VALUE::3.22.1
 
     - name: Generate cache key
       id: cache_key
@@ -86,22 +86,56 @@ jobs:
         echo ::set-output name=CMAKE_BINARY::$(realpath $(find cmake* -type d -name bin)/cmake)
 
     - name: Configure the project
+
+      env:
+        TOOLCHAIN_PATH: ${{ steps.osquery_toolchain_installer.outputs.PATH }}
+
       run: |
         export CCACHE_DIR="$(realpath ccache)"
-        ( cd build && ${{ steps.cmake_installer.outputs.CMAKE_BINARY }} -G Ninja -DEBPF_COMMON_TOOLCHAIN_PATH:PATH=${{ steps.osquery_toolchain_installer.outputs.PATH }} -DCMAKE_BUILD_TYPE:STRING=${{ matrix.build_type }} -DEBPFPUB_ENABLE_INSTALL:BOOL=true -DEBPFPUB_BUILD_EXAMPLES:BOOL=true -DEBPF_COMMON_ENABLE_TESTS:BOOL=true -DEBPF_COMMON_ENABLE_SANITIZERS:BOOL=true -DEBPFPUB_ENABLE_TESTS=ON .. )
+
+        ${{ steps.cmake_installer.outputs.CMAKE_BINARY }} \
+          -S . \
+          -B build \
+          -G Ninja \
+          -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain.cmake \
+          -DCMAKE_BUILD_TYPE:STRING=${{ matrix.build_type }} \
+          -DEBPFPUB_ENABLE_INSTALL:BOOL=true \
+          -DEBPFPUB_BUILD_EXAMPLES:BOOL=true \
+          -DEBPF_COMMON_ENABLE_TESTS:BOOL=true \
+          -DEBPF_COMMON_ENABLE_SANITIZERS:BOOL=true \
+          -DEBPFPUB_ENABLE_TESTS=ON
 
     - name: Build the project
+
+      env:
+        TOOLCHAIN_PATH: ${{ steps.osquery_toolchain_installer.outputs.PATH }}
+
       run: |
         export CCACHE_DIR="$(realpath ccache)"
-        ( cd build && ninja -v )
+
+        ${{ steps.cmake_installer.outputs.CMAKE_BINARY }} \
+          --build build \
+          -v
 
     - name: Run the ebpf-common tests
+
+      env:
+        TOOLCHAIN_PATH: ${{ steps.osquery_toolchain_installer.outputs.PATH }}
+
       run: ( cd build && sudo ninja -v run-ebpf-common-tests )
 
     - name: Run the ebpfpub tests
+
+      env:
+        TOOLCHAIN_PATH: ${{ steps.osquery_toolchain_installer.outputs.PATH }}
+
       run: ( cd build && ninja -v run-ebpfpub-tests )
 
     - name: Install the project
+
+      env:
+        TOOLCHAIN_PATH: ${{ steps.osquery_toolchain_installer.outputs.PATH }}
+
       run: |
         export DESTDIR="$(realpath install)" &&
         ( cd build && ninja -v install )
