@@ -56,6 +56,7 @@ target_link_libraries("ebpfpub"
     "ebpf"
     "error"
     "utils"
+    "btfparse"
 )
 
 target_compile_definitions("ebpfpub" PUBLIC

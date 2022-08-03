@@ -23,7 +23,7 @@ StringErrorOr<IFunctionTracer::Ref>
 IFunctionTracer::createFromSyscallTracepoint(
     const std::string &name, IBufferStorage &buffer_storage,
     ebpf::PerfEventArray &perf_event_array, std::size_t event_map_size,
-    OptionalPidList excluded_processes) {
+    OptionalPidList excluded_processes, const btfparse::IBTF::Ptr &btf) {
 
   TracepointSerializers serializers;
   auto param_list_exp = serializers.getParameterList(name);
@@ -34,14 +34,15 @@ IFunctionTracer::createFromSyscallTracepoint(
   auto parameter_list = param_list_exp.takeValue();
   return createFromSyscallTracepoint(name, parameter_list, buffer_storage,
                                      perf_event_array, event_map_size,
-                                     excluded_processes);
+                                     excluded_processes, btf);
 }
 
 StringErrorOr<IFunctionTracer::Ref>
 IFunctionTracer::createFromSyscallTracepoint(
     const std::string &name, const ParameterList &parameter_list,
     IBufferStorage &buffer_storage, ebpf::PerfEventArray &perf_event_array,
-    std::size_t event_map_size, OptionalPidList excluded_processes) {
+    std::size_t event_map_size, OptionalPidList excluded_processes,
+    const btfparse::IBTF::Ptr &btf) {
 
   try {
     auto event_exp =
@@ -62,9 +63,10 @@ IFunctionTracer::createFromSyscallTracepoint(
 
     auto exit_event = event_exp.takeValue();
 
-    return Ref(new FunctionTracer(
-        name, parameter_list, event_map_size, buffer_storage, perf_event_array,
-        std::move(enter_event), std::move(exit_event), excluded_processes));
+    return Ref(new FunctionTracer(name, parameter_list, event_map_size,
+                                  buffer_storage, perf_event_array,
+                                  std::move(enter_event), std::move(exit_event),
+                                  excluded_processes, btf));
 
   } catch (const std::bad_alloc &) {
     return StringError::create("Memory allocation failure");
@@ -78,7 +80,7 @@ StringErrorOr<IFunctionTracer::Ref> IFunctionTracer::createFromKprobe(
     const std::string &name, bool is_syscall,
     const ParameterList &parameter_list, IBufferStorage &buffer_storage,
     ebpf::PerfEventArray &perf_event_array, std::size_t event_map_size,
-    OptionalPidList excluded_processes) {
+    OptionalPidList excluded_processes, const btfparse::IBTF::Ptr &btf) {
 
   try {
     auto resolved_name{name};
@@ -123,7 +125,7 @@ StringErrorOr<IFunctionTracer::Ref> IFunctionTracer::createFromKprobe(
     return Ref(new FunctionTracer(resolved_name, parameter_list, event_map_size,
                                   buffer_storage, perf_event_array,
                                   std::move(enter_event), std::move(exit_event),
-                                  excluded_processes));
+                                  excluded_processes, btf));
 
   } catch (const std::bad_alloc &) {
     return StringError::create("Memory allocation failure");
@@ -137,7 +139,7 @@ StringErrorOr<IFunctionTracer::Ref> IFunctionTracer::createFromUprobe(
     const std::string &name, const std::string &path,
     const ParameterList &parameter_list, IBufferStorage &buffer_storage,
     ebpf::PerfEventArray &perf_event_array, std::size_t event_map_size,
-    OptionalPidList excluded_processes) {
+    OptionalPidList excluded_processes, const btfparse::IBTF::Ptr &btf) {
 
   try {
     // Create the enter event
@@ -157,9 +159,10 @@ StringErrorOr<IFunctionTracer::Ref> IFunctionTracer::createFromUprobe(
     auto exit_event = event_exp.takeValue();
 
     // Create the function tracer using the events we obtained
-    return Ref(new FunctionTracer(
-        name, parameter_list, event_map_size, buffer_storage, perf_event_array,
-        std::move(enter_event), std::move(exit_event), excluded_processes));
+    return Ref(new FunctionTracer(name, parameter_list, event_map_size,
+                                  buffer_storage, perf_event_array,
+                                  std::move(enter_event), std::move(exit_event),
+                                  excluded_processes, btf));
 
   } catch (const std::bad_alloc &) {
     return StringError::create("Memory allocation failure");
