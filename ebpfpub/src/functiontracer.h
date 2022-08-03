@@ -8,11 +8,12 @@
 
 #pragma once
 
+#include "tob/ebpf/illvmbridge.h"
 #include <ebpfpub/ifunctiontracer.h>
 
 #include <tob/ebpf/bpfsyscallinterface.h>
-#include <tob/ebpf/bufferreader.h>
 #include <tob/ebpf/iperfevent.h>
+#include <tob/utils/bufferreader.h>
 
 namespace tob::ebpfpub {
 class FunctionTracer final : public IFunctionTracer {
@@ -36,7 +37,7 @@ public:
   virtual std::string ir() const override;
 
   StringErrorOr<EventList>
-  parseEventData(ebpf::BufferReader &buffer_reader) const;
+  parseEventData(utils::BufferReader &buffer_reader) const;
 
 private:
   struct PrivateData;
@@ -47,7 +48,8 @@ private:
                  ebpf::PerfEventArray &perf_event_array,
                  ebpf::IPerfEvent::Ref enter_event,
                  ebpf::IPerfEvent::Ref exit_event,
-                 OptionalPidList excluded_processes);
+                 OptionalPidList excluded_processes,
+                 const btfparse::IBTF::Ptr &btf);
 
   friend class IFunctionTracer;
 
@@ -95,7 +97,8 @@ public:
 
   static llvm::Type *llvmTypeForMemoryPointer(llvm::Module &module);
 
-  static SuccessOrStringError createEventHeaderType(llvm::Module &module);
+  static SuccessOrStringError createEventHeaderType(llvm::Module &module,
+                                                    bool enable_cgroup_name);
 
   static SuccessOrStringError
   createEventDataType(llvm::Module &module,
@@ -130,12 +133,15 @@ public:
       EventScratchSpace &event_scratch_space, ebpf::IPerfEvent &enter_event,
       const ParameterList &parameter_list,
       const ParameterListIndex &param_list_index,
-      IBufferStorage &buffer_storage, OptionalPidList excluded_processes);
+      IBufferStorage &buffer_storage, OptionalPidList excluded_processes,
+      const ebpf::ILLVMBridge::Ptr &llvm_bridge);
 
   static SuccessOrStringError
   generateEventHeader(llvm::IRBuilder<> &builder, ebpf::IPerfEvent &enter_event,
                       ebpf::BPFSyscallInterface &bpf_syscall_interface,
-                      llvm::Value *event_object);
+                      llvm::Value *event_object,
+                      const StackAllocationList &allocation_list,
+                      const ebpf::ILLVMBridge::Ptr &llvm_bridge);
 
   static SuccessOrStringError generateEnterEventData(
       llvm::IRBuilder<> &builder, ebpf::IPerfEvent &enter_event,
@@ -170,11 +176,11 @@ public:
                           llvm::Value *probe_error_flag);
 
   static StringErrorOr<EventList> parseEventData(
-      ebpf::BufferReader &buffer_reader, std::uint32_t event_object_size,
+      utils::BufferReader &buffer_reader, std::uint32_t event_object_size,
       std::uint64_t event_object_identifier, const std::string &event_name,
       const ParameterList &parameter_list,
       const ParameterListIndex &param_list_index,
-      IBufferStorage &buffer_storage);
+      IBufferStorage &buffer_storage, bool enable_cgroup_name);
 
   static SuccessOrStringError captureString(
       llvm::IRBuilder<> &builder,

@@ -13,6 +13,8 @@
 #include <ebpfpub/ifunctiontracer.h>
 #include <ebpfpub/iperfeventreader.h>
 
+#include <btfparse/ibtf.h>
+
 #include <tob/ebpf/perfeventarray.h>
 
 #include <netinet/in.h>
@@ -74,6 +76,26 @@ void eventParser(
               << "probe_error: " << event.header.probe_error << " "
               << "duration: " << event.header.duration << "\n";
 
+    if (event.header.opt_cgroup_name_slices.has_value()) {
+      const auto &cgroup_name_slices =
+          event.header.opt_cgroup_name_slices.value();
+
+      std::cout << "cgroup_name: ";
+
+      for (auto it = cgroup_name_slices.begin(); it != cgroup_name_slices.end();
+           ++it) {
+
+        const auto &cgroup_name = *it;
+        std::cout << "'" << cgroup_name << "'";
+
+        if (std::next(it, 1) != cgroup_name_slices.end()) {
+          std::cout << ", ";
+        }
+      }
+
+      std::cout << "\n";
+    }
+
     std::cout << "  " << event.name << "(";
 
     const auto &filename =
@@ -103,6 +125,15 @@ void eventParser(
 }
 
 int main(int argc, char *argv[]) {
+  bool enable_btf{false};
+  if (argc >= 2 && std::strcmp(argv[1], "--enable-btf") == 0) {
+    enable_btf = true;
+    std::cout << "cgroup names enabled\n";
+
+  } else {
+    std::cout << "You can use --enable-btf to add support for cgroup names\n";
+  }
+
   setRlimit();
 
   auto buffer_storage_exp = tob::ebpfpub::IBufferStorage::create(1024, 4096);
@@ -131,12 +162,32 @@ int main(int argc, char *argv[]) {
 
   auto perf_event_reader = perf_event_reader_exp.takeValue();
 
+  btfparse::IBTF::Ptr btf{nullptr};
+
+  if (enable_btf) {
+    auto btf_res =
+        btfparse::IBTF::createFromPathList({"/sys/kernel/btf/vmlinux"});
+
+    if (btf_res.failed()) {
+      std::cerr << "Failed to open the BTF file: " << btf_res.takeError()
+                << "\n";
+      return 1;
+    }
+
+    btf = btf_res.takeValue();
+    if (btf->count() == 0) {
+      std::cout << "No types were found!\n";
+      return 1;
+    }
+  }
+
   const std::vector<std::string> kSyscallNameList = {"execve", "execveat"};
 
   for (const auto &syscall_name : kSyscallNameList) {
     auto function_tracer_exp =
         tob::ebpfpub::IFunctionTracer::createFromSyscallTracepoint(
-            syscall_name, *buffer_storage.get(), *perf_event_array.get(), 2048);
+            syscall_name, *buffer_storage.get(), *perf_event_array.get(), 2048,
+            std::nullopt, btf);
 
     if (!function_tracer_exp.succeeded()) {
       throw std::runtime_error("Failed to create the function tracer: " +

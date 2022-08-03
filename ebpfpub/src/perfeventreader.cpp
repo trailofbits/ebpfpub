@@ -12,8 +12,8 @@
 #include <unordered_map>
 #include <vector>
 
-#include <tob/ebpf/bufferreader.h>
 #include <tob/ebpf/perfeventarray.h>
+#include <tob/utils/bufferreader.h>
 
 namespace tob::ebpfpub {
 struct PerfEventReader::PrivateData final {
@@ -21,7 +21,7 @@ struct PerfEventReader::PrivateData final {
       : perf_event_array(perf_event_array_) {}
 
   ebpf::PerfEventArray &perf_event_array;
-  ebpf::BufferReader::Ptr buffer_reader;
+  utils::BufferReader::Ptr buffer_reader;
 
   std::unordered_map<std::uint64_t, IFunctionTracer::Ref> function_tracer_map;
 };
@@ -91,7 +91,7 @@ SuccessOrStringError PerfEventReader::exec(const std::chrono::seconds &timeout,
         }
       }
 
-    } catch (const ebpf::BufferReader::ReadError &) {
+    } catch (const utils::BufferReader::ReadError &) {
       ++error_counters.invalid_event_data;
     }
   }
@@ -107,7 +107,7 @@ SuccessOrStringError PerfEventReader::exec(const std::chrono::seconds &timeout,
 PerfEventReader::PerfEventReader(ebpf::PerfEventArray &perf_event_array)
     : d(new PrivateData(perf_event_array)) {
 
-  auto buffer_reader_exp = ebpf::BufferReader::create();
+  auto buffer_reader_exp = utils::BufferReader::create();
   if (!buffer_reader_exp.succeeded()) {
     throw buffer_reader_exp.error();
   }

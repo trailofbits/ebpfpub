@@ -16,8 +16,8 @@
 #include <variant>
 #include <vector>
 
+#include <btfparse/ibtf.h>
 #include <ebpfpub/ibufferstorage.h>
-
 #include <tob/ebpf/perfeventarray.h>
 
 namespace tob::ebpfpub {
@@ -47,6 +47,7 @@ public:
       std::uint64_t exit_code{0U};
       bool probe_error{false};
       std::uint64_t duration{0U};
+      std::optional<std::vector<std::string>> opt_cgroup_name_slices;
     };
 
     struct Field final {
@@ -78,24 +79,29 @@ public:
   static StringErrorOr<Ref> createFromSyscallTracepoint(
       const std::string &name, IBufferStorage &buffer_storage,
       ebpf::PerfEventArray &perf_event_array, std::size_t event_map_size,
-      OptionalPidList excluded_processes = {});
+      OptionalPidList excluded_processes = std::nullopt,
+      const btfparse::IBTF::Ptr &btf = nullptr);
 
   static StringErrorOr<Ref> createFromSyscallTracepoint(
       const std::string &name, const ParameterList &parameter_list,
       IBufferStorage &buffer_storage, ebpf::PerfEventArray &perf_event_array,
-      std::size_t event_map_size, OptionalPidList excluded_processes = {});
+      std::size_t event_map_size,
+      OptionalPidList excluded_processes = std::nullopt,
+      const btfparse::IBTF::Ptr &btf = nullptr);
 
   static StringErrorOr<IFunctionTracer::Ref> createFromKprobe(
       const std::string &name, bool is_syscall,
       const ParameterList &parameter_list, IBufferStorage &buffer_storage,
       ebpf::PerfEventArray &perf_event_array, std::size_t event_map_size,
-      OptionalPidList excluded_processes = {});
+      OptionalPidList excluded_processes = std::nullopt,
+      const btfparse::IBTF::Ptr &btf = nullptr);
 
   static StringErrorOr<IFunctionTracer::Ref> createFromUprobe(
       const std::string &name, const std::string &path,
       const ParameterList &parameter_list, IBufferStorage &buffer_storage,
       ebpf::PerfEventArray &perf_event_array, std::size_t event_map_size,
-      OptionalPidList excluded_processes = {});
+      OptionalPidList excluded_processes = std::nullopt,
+      const btfparse::IBTF::Ptr &btf = nullptr);
 
   IFunctionTracer() = default;
   virtual ~IFunctionTracer() = default;

@@ -11,21 +11,28 @@
 #include "forknamespacehelper.h"
 #include "llvm_compat.h"
 
+#include <cstddef>
 #include <iostream>
 #include <limits>
+#include <llvm/IR/BasicBlock.h>
+#include <llvm/IR/Type.h>
 #include <unordered_set>
 
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/Verifier.h>
 
 #include <tob/ebpf/ebpf_utils.h>
+#include <tob/ebpf/illvmbridge.h>
 #include <tob/ebpf/iperfevent.h>
 #include <tob/ebpf/llvm_utils.h>
 #include <tob/ebpf/tracepointdescriptor.h>
 #include <tob/utils/kernel.h>
 
 namespace tob::ebpfpub {
+
 namespace {
+
+const std::uint64_t kCgroupNameSliceSize{32};
 const std::string kSpecialExitCodeParameterName{"EXIT_CODE"};
 const std::string kLLVMModuleName{"FunctionTracer"};
 const std::string kEventTypeName{"Event"};
@@ -81,6 +88,7 @@ struct FunctionTracer::PrivateData final {
   utils::UniqueFd exit_program;
 
   ForkNamespaceHelper::Ref fork_ns_helper;
+  ebpf::ILLVMBridge::Ptr llvm_bridge;
 };
 
 FunctionTracer::~FunctionTracer() {}
@@ -94,14 +102,17 @@ std::uint64_t FunctionTracer::eventIdentifier() const {
 std::string FunctionTracer::ir() const { return d->module_ir; }
 
 StringErrorOr<FunctionTracer::EventList>
-FunctionTracer::parseEventData(ebpf::BufferReader &buffer_reader) const {
+FunctionTracer::parseEventData(utils::BufferReader &buffer_reader) const {
 
   auto event_object_size =
       static_cast<std::uint32_t>(d->event_map->valueSize());
 
-  auto event_data_exp = parseEventData(
-      buffer_reader, event_object_size, eventIdentifier(), name(),
-      d->parameter_list, d->parameter_list_index, d->buffer_storage);
+  bool enable_cgroup_name = d->llvm_bridge != nullptr;
+
+  auto event_data_exp =
+      parseEventData(buffer_reader, event_object_size, eventIdentifier(),
+                     name(), d->parameter_list, d->parameter_list_index,
+                     d->buffer_storage, enable_cgroup_name);
 
   return event_data_exp;
 }
@@ -110,7 +121,8 @@ FunctionTracer::FunctionTracer(
     const std::string &name, const ParameterList &parameter_list,
     std::size_t event_map_size, IBufferStorage &buffer_storage,
     ebpf::PerfEventArray &perf_event_array, ebpf::IPerfEvent::Ref enter_event,
-    ebpf::IPerfEvent::Ref exit_event, OptionalPidList excluded_processes)
+    ebpf::IPerfEvent::Ref exit_event, OptionalPidList excluded_processes,
+    const btfparse::IBTF::Ptr &btf)
     : d(new PrivateData(buffer_storage, perf_event_array)) {
 
   d->name = name;
@@ -148,7 +160,16 @@ FunctionTracer::FunctionTracer(
   }
 
   auto &llvm_module = *llvm_module_ref.get();
-  success_exp = createEventHeaderType(llvm_module);
+
+  if (btf != nullptr) {
+    auto llvm_bridge_res = ebpf::ILLVMBridge::create(llvm_module, *btf.get());
+    if (!llvm_bridge_res.failed()) {
+      d->llvm_bridge = llvm_bridge_res.takeValue();
+    }
+  }
+
+  auto enable_cgroup_name = d->llvm_bridge != nullptr;
+  success_exp = createEventHeaderType(llvm_module, enable_cgroup_name);
   if (success_exp.failed()) {
     throw success_exp.error();
   }
@@ -200,7 +221,7 @@ FunctionTracer::FunctionTracer(
   success_exp = createEnterFunction(
       llvm_module, event_map_ref, event_scratch_space_ref,
       *d->enter_event.get(), parameter_list, d->parameter_list_index,
-      d->buffer_storage, excluded_processes);
+      d->buffer_storage, excluded_processes, d->llvm_bridge);
 
   if (success_exp.failed()) {
     throw success_exp.error();
@@ -788,7 +809,8 @@ llvm::Type *FunctionTracer::llvmTypeForMemoryPointer(llvm::Module &module) {
 }
 
 SuccessOrStringError
-FunctionTracer::createEventHeaderType(llvm::Module &module) {
+FunctionTracer::createEventHeaderType(llvm::Module &module,
+                                      bool enable_cgroup_name) {
   auto &context = module.getContext();
 
   // clang-format off
@@ -821,6 +843,14 @@ FunctionTracer::createEventHeaderType(llvm::Module &module) {
     llvm::Type::getInt64Ty(context)
   };
   // clang-format on
+
+  if (enable_cgroup_name) {
+    auto character_array = llvm::ArrayType::get(llvm::Type::getInt8Ty(context),
+                                                kCgroupNameSliceSize);
+
+    type_list.push_back(character_array);
+    type_list.push_back(character_array);
+  }
 
   auto existing_type_ptr = getTypeByName(module, kEventHeaderTypeName);
   if (existing_type_ptr != nullptr) {
@@ -1156,7 +1186,8 @@ SuccessOrStringError FunctionTracer::createEnterFunction(
     EventScratchSpace &event_scratch_space, ebpf::IPerfEvent &enter_event,
     const ParameterList &parameter_list,
     const ParameterListIndex &param_list_index, IBufferStorage &buffer_storage,
-    OptionalPidList excluded_processes) {
+    OptionalPidList excluded_processes,
+    const ebpf::ILLVMBridge::Ptr &llvm_bridge) {
 
   // Create the function
   auto function_param_type =
@@ -1278,8 +1309,9 @@ SuccessOrStringError FunctionTracer::createEnterFunction(
   auto scratch_space = scratch_space_exp.takeValue();
 
   // Generate the event header
-  success_exp = generateEventHeader(
-      builder, enter_event, *bpf_syscall_interface.get(), scratch_space);
+  success_exp =
+      generateEventHeader(builder, enter_event, *bpf_syscall_interface.get(),
+                          scratch_space, stack_allocation_list, llvm_bridge);
 
   if (success_exp.failed()) {
     return success_exp.error();
@@ -1339,8 +1371,9 @@ SuccessOrStringError FunctionTracer::createEnterFunction(
 
 SuccessOrStringError FunctionTracer::generateEventHeader(
     llvm::IRBuilder<> &builder, ebpf::IPerfEvent &enter_event,
-    ebpf::BPFSyscallInterface &bpf_syscall_interface,
-    llvm::Value *event_object) {
+    ebpf::BPFSyscallInterface &bpf_syscall_interface, llvm::Value *event_object,
+    const StackAllocationList &allocation_list,
+    const ebpf::ILLVMBridge::Ptr &llvm_bridge) {
 
   auto current_bb = builder.GetInsertBlock();
   auto &module = *current_bb->getModule();
@@ -1437,6 +1470,76 @@ SuccessOrStringError FunctionTracer::generateEventHeader(
       event_header, {builder.getInt32(0U), builder.getInt32(8U)});
 
   builder.CreateStore(builder.getInt64(0U), event_header_field);
+
+  // Capture the cgroup name
+  if (llvm_bridge != nullptr) {
+    auto parent_cgroup_name = builder.CreateGEP(
+        event_header, {builder.getInt32(0U), builder.getInt32(9U)});
+
+    auto current_cgroup_name = builder.CreateGEP(
+        event_header, {builder.getInt32(0U), builder.getInt32(10U)});
+
+    auto current_task = bpf_syscall_interface.getCurrentTask();
+
+    auto type_res = llvm_bridge->getType("task_struct");
+    if (type_res.failed()) {
+      const auto &error = type_res.takeError();
+
+      return StringError::create(
+          "The task_struct type could not be obtained from BTF: " +
+          error.toString());
+    }
+
+    auto task_struct_type = type_res.takeValue();
+
+    auto temp_storage_exp =
+        getStackAllocation(allocation_list, "generic_map_index_64");
+
+    if (!temp_storage_exp.succeeded()) {
+      return temp_storage_exp.error();
+    }
+
+    auto temp_storage = temp_storage_exp.takeValue();
+
+    auto cgroup_name_ptr_res = llvm_bridge->getElementPtr(
+        builder, current_task, task_struct_type,
+        "cgroups.subsys[0].cgroup.kn.parent.name", temp_storage);
+
+    if (cgroup_name_ptr_res.failed()) {
+      const auto &error = cgroup_name_ptr_res.takeError();
+
+      return StringError::create("The cgroup name ptr could not be obtained: " +
+                                 error.toString());
+    }
+
+    auto cgroup_name_ptr = cgroup_name_ptr_res.takeValue();
+
+    bpf_syscall_interface.probeRead(temp_storage, builder.getInt64(8U),
+                                    cgroup_name_ptr.opaque_pointer);
+
+    bpf_syscall_interface.probeReadStr(parent_cgroup_name, kCgroupNameSliceSize,
+                                       builder.CreateLoad(temp_storage));
+
+    cgroup_name_ptr_res = llvm_bridge->getElementPtr(
+        builder, current_task, task_struct_type,
+        "cgroups.subsys[0].cgroup.kn.name", temp_storage);
+
+    if (cgroup_name_ptr_res.failed()) {
+      const auto &error = cgroup_name_ptr_res.takeError();
+
+      return StringError::create("The cgroup name ptr could not be obtained: " +
+                                 error.toString());
+    }
+
+    cgroup_name_ptr = cgroup_name_ptr_res.takeValue();
+
+    bpf_syscall_interface.probeRead(temp_storage, builder.getInt64(8U),
+                                    cgroup_name_ptr.opaque_pointer);
+
+    bpf_syscall_interface.probeReadStr(current_cgroup_name,
+                                       kCgroupNameSliceSize,
+                                       builder.CreateLoad(temp_storage));
+  }
 
   return {};
 }
@@ -2093,11 +2196,11 @@ void FunctionTracer::captureIntegerByPointer(
 }
 
 StringErrorOr<FunctionTracer::EventList> FunctionTracer::parseEventData(
-    ebpf::BufferReader &buffer_reader, std::uint32_t event_object_size,
+    utils::BufferReader &buffer_reader, std::uint32_t event_object_size,
     std::uint64_t event_object_identifier, const std::string &event_name,
     const ParameterList &parameter_list,
-    const ParameterListIndex &param_list_index,
-    IBufferStorage &buffer_storage) {
+    const ParameterListIndex &param_list_index, IBufferStorage &buffer_storage,
+    bool enable_cgroup_name) {
 
   EventList output;
   bool first_event_object{true};
@@ -2160,6 +2263,25 @@ StringErrorOr<FunctionTracer::EventList> FunctionTracer::parseEventData(
     event.header.exit_code = buffer_reader.u64();
     event.header.probe_error = (buffer_reader.u64() != 0);
     event.header.duration = buffer_reader.u64();
+
+    if (enable_cgroup_name) {
+      std::string buffer(kCgroupNameSliceSize, '\0');
+      buffer_reader.read(&buffer[0], 32);
+
+      std::vector<std::string> cgroup_name_slices;
+      if (buffer[0] != 0) {
+        cgroup_name_slices.push_back(buffer.c_str());
+      }
+
+      buffer_reader.read(&buffer[0], 32);
+      if (buffer[0] != 0) {
+        cgroup_name_slices.push_back(buffer.c_str());
+      }
+
+      if (!cgroup_name_slices.empty()) {
+        event.header.opt_cgroup_name_slices = std::move(cgroup_name_slices);
+      }
+    }
 
     // Get the event data
     std::unordered_map<std::string, std::uint64_t> integer_parameter_map;

@@ -118,7 +118,7 @@ ForkNamespaceHelper::ForkNamespaceHelper(int event_map_fd)
 
 SuccessOrStringError
 ForkNamespaceHelper::importFunctionTracerEventHeader(llvm::Module &module) {
-  return FunctionTracer::createEventHeaderType(module);
+  return FunctionTracer::createEventHeaderType(module, false);
 }
 
 SuccessOrStringError
