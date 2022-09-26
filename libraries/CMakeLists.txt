@@ -9,6 +9,10 @@
 cmake_minimum_required(VERSION 3.14.6)
 
 function(ebpfpubLibraries)
+  if (TARGET "ebpf" AND TARGET "utils" AND TARGET "error")
+    return()
+  endif()
+
   add_subdirectory("ebpf-common")
 endfunction()
 
