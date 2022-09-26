@@ -6,7 +6,7 @@
 # the LICENSE file found in the root directory of this source tree.
 #
 
-cmake_minimum_required(VERSION 3.22.1)
+cmake_minimum_required(VERSION 3.21.4)
 project("ebpfpub")
 
 include("cmake/options.cmake")
