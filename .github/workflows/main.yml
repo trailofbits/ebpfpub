@@ -102,7 +102,6 @@ jobs:
           -DEBPFPUB_ENABLE_INSTALL:BOOL=true \
           -DEBPFPUB_BUILD_EXAMPLES:BOOL=true \
           -DEBPF_COMMON_ENABLE_TESTS:BOOL=true \
-          -DEBPF_COMMON_ENABLE_SANITIZERS:BOOL=true \
           -DEBPFPUB_ENABLE_TESTS=ON
 
     - name: Build the project
