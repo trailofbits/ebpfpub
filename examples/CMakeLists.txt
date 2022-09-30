@@ -13,6 +13,7 @@ if(EBPFPUB_BUILD_EXAMPLES)
   add_subdirectory("execsnoop")
   add_subdirectory("readline_trace")
   add_subdirectory("kprobe_execsnoop")
+  add_subdirectory("systemd_resolved")
 endif()
 
 if(EBFPPUB_BUILD_SOCKETMONITOR_EXAMPLE)
