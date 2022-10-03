@@ -6,7 +6,7 @@
 #include <llvm/IR/Verifier.h>
 
 #include <tob/ebpf/ebpf_utils.h>
-#include <tob/ebpf/iperfevent.h>
+#include <tob/ebpf/ievent.h>
 #include <tob/ebpf/llvm_utils.h>
 #include <tob/ebpf/tracepointdescriptor.h>
 
@@ -21,7 +21,7 @@ const std::string kTracepointParameterTypeName{"ForkArgs"};
 } // namespace
 
 struct ForkNamespaceHelper::PrivateData final {
-  tob::ebpf::IPerfEvent::Ref sched_process_fork_event;
+  tob::ebpf::IEvent::Ref sched_process_fork_event;
   utils::UniqueFd program;
 };
 
@@ -43,7 +43,7 @@ ForkNamespaceHelper::~ForkNamespaceHelper() {}
 ForkNamespaceHelper::ForkNamespaceHelper(int event_map_fd)
     : d(new PrivateData) {
   auto tracepoint_event_exp =
-      ebpf::IPerfEvent::createTracepoint(kTracepointCategory, kTracepointName);
+      ebpf::IEvent::createTracepoint(kTracepointCategory, kTracepointName);
 
   if (!tracepoint_event_exp.succeeded()) {
     throw tracepoint_event_exp.error();

@@ -6,8 +6,6 @@
 # the LICENSE file found in the root directory of this source tree.
 #
 
-cmake_minimum_required(VERSION 3.14.6)
-
 add_library("ebpfpub"
   include/ebpfpub/ibufferstorage.h
   include/ebpfpub/iperfeventreader.h
@@ -63,37 +61,6 @@ target_compile_definitions("ebpfpub" PUBLIC
   EBPFPUB_VERSION="${EBPFPUB_VERSION}"
   LLVM_MAJOR_VERSION="${LLVM_MAJOR_VERSION}"
 )
-
-if(EBPFPUB_ENABLE_INSTALL)
-  install(
-    DIRECTORY "include/ebpfpub/"
-    DESTINATION "include/ebpfpub"
-    FILES_MATCHING PATTERN "*.h"
-  )
-
-  install(
-    DIRECTORY "${CMAKE_SOURCE_DIR}/libraries/ebpf-common/src/ebpf/include/tob/ebpf/"
-    DESTINATION "include/tob/ebpf"
-    FILES_MATCHING PATTERN "*.h"
-  )
-
-  install(
-    DIRECTORY "${CMAKE_SOURCE_DIR}/libraries/ebpf-common/src/error/include/tob/error/"
-    DESTINATION "include/tob/error"
-    FILES_MATCHING PATTERN "*.h"
-  )
-
-  install(
-    DIRECTORY "${CMAKE_SOURCE_DIR}/libraries/ebpf-common/src/utils/include/tob/utils/"
-    DESTINATION "include/tob/utils"
-    FILES_MATCHING PATTERN "*.h"
-  )
-
-  install(
-    TARGETS ebpfpub
-    DESTINATION "lib"
-  )
-endif()
 
 if(EBPFPUB_ENABLE_TESTS)
   add_subdirectory("tests")

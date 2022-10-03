@@ -1,3 +1,6 @@
 [submodule "libraries/ebpf-common/src"]
 	path = libraries/ebpf-common/src
 	url = https://github.com/trailofbits/ebpf-common
+[submodule "libraries/doctest/src"]
+	path = libraries/doctest/src
+	url = https://github.com/onqtam/doctest

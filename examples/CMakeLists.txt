@@ -6,7 +6,7 @@
 # the LICENSE file found in the root directory of this source tree.
 #
 
-if(EBPFPUB_BUILD_EXAMPLES)
+if(EBPFPUB_ENABLE_EXAMPLES)
   message(STATUS "ebpfpub - Examples are being built")
 
   add_subdirectory("socketevents")
@@ -14,9 +14,4 @@ if(EBPFPUB_BUILD_EXAMPLES)
   add_subdirectory("readline_trace")
   add_subdirectory("kprobe_execsnoop")
   add_subdirectory("systemd_resolved")
-endif()
-
-if(EBFPPUB_BUILD_SOCKETMONITOR_EXAMPLE)
-  message(STATUS "ebpfpub - The SocketMonitor example is being built")
-  add_subdirectory("SocketMonitor")
 endif()
