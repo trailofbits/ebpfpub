@@ -10,7 +10,7 @@
 #include "kallsymsparser.h"
 #include "tracepointserializers.h"
 
-#include <tob/ebpf/iperfevent.h>
+#include <tob/ebpf/ievent.h>
 
 namespace tob::ebpfpub {
 
@@ -46,7 +46,7 @@ IFunctionTracer::createFromSyscallTracepoint(
 
   try {
     auto event_exp =
-        ebpf::IPerfEvent::createTracepoint("syscalls", "sys_enter_" + name);
+        ebpf::IEvent::createTracepoint("syscalls", "sys_enter_" + name);
 
     if (!event_exp.succeeded()) {
       return event_exp.error();
@@ -54,8 +54,7 @@ IFunctionTracer::createFromSyscallTracepoint(
 
     auto enter_event = event_exp.takeValue();
 
-    event_exp =
-        ebpf::IPerfEvent::createTracepoint("syscalls", "sys_exit_" + name);
+    event_exp = ebpf::IEvent::createTracepoint("syscalls", "sys_exit_" + name);
 
     if (!event_exp.succeeded()) {
       return event_exp.error();
@@ -106,7 +105,7 @@ StringErrorOr<IFunctionTracer::Ref> IFunctionTracer::createFromKprobe(
 
     // Create the enter event
     auto event_exp =
-        ebpf::IPerfEvent::createKprobe(resolved_name, is_syscall, false);
+        ebpf::IEvent::createKprobe(resolved_name, is_syscall, false);
     if (!event_exp.succeeded()) {
       return event_exp.error();
     }
@@ -114,7 +113,7 @@ StringErrorOr<IFunctionTracer::Ref> IFunctionTracer::createFromKprobe(
     auto enter_event = event_exp.takeValue();
 
     // Create the exit event
-    event_exp = ebpf::IPerfEvent::createKprobe(resolved_name, is_syscall, true);
+    event_exp = ebpf::IEvent::createKprobe(resolved_name, is_syscall, true);
     if (!event_exp.succeeded()) {
       return event_exp.error();
     }
@@ -143,7 +142,7 @@ StringErrorOr<IFunctionTracer::Ref> IFunctionTracer::createFromUprobe(
 
   try {
     // Create the enter event
-    auto event_exp = ebpf::IPerfEvent::createUprobe(name, path, false);
+    auto event_exp = ebpf::IEvent::createUprobe(name, path, false);
     if (!event_exp.succeeded()) {
       return event_exp.error();
     }
@@ -151,7 +150,7 @@ StringErrorOr<IFunctionTracer::Ref> IFunctionTracer::createFromUprobe(
     auto enter_event = event_exp.takeValue();
 
     // Create the exit event
-    event_exp = ebpf::IPerfEvent::createUprobe(name, path, true);
+    event_exp = ebpf::IEvent::createUprobe(name, path, true);
     if (!event_exp.succeeded()) {
       return event_exp.error();
     }

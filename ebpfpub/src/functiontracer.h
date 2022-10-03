@@ -12,7 +12,7 @@
 #include <ebpfpub/ifunctiontracer.h>
 
 #include <tob/ebpf/bpfsyscallinterface.h>
-#include <tob/ebpf/iperfevent.h>
+#include <tob/ebpf/ievent.h>
 #include <tob/utils/bufferreader.h>
 
 namespace tob::ebpfpub {
@@ -46,8 +46,7 @@ private:
   FunctionTracer(const std::string &name, const ParameterList &parameter_list,
                  std::size_t event_map_size, IBufferStorage &buffer_storage,
                  ebpf::PerfEventArray &perf_event_array,
-                 ebpf::IPerfEvent::Ref enter_event,
-                 ebpf::IPerfEvent::Ref exit_event,
+                 ebpf::IEvent::Ref enter_event, ebpf::IEvent::Ref exit_event,
                  OptionalPidList excluded_processes,
                  const btfparse::IBTF::Ptr &btf);
 
@@ -114,12 +113,12 @@ public:
 
   static SuccessOrStringError
   createEnterFunctionArgumentType(llvm::Module &module,
-                                  ebpf::IPerfEvent &enter_event,
+                                  ebpf::IEvent &enter_event,
                                   const ParameterList &parameter_list);
 
   static SuccessOrStringError
   createExitFunctionArgumentType(llvm::Module &module,
-                                 ebpf::IPerfEvent &exit_event);
+                                 ebpf::IEvent &exit_event);
 
   static StringErrorOr<llvm::Value *>
   getMapEntry(int fd, llvm::IRBuilder<> &builder,
@@ -130,30 +129,31 @@ public:
 
   static SuccessOrStringError createEnterFunction(
       llvm::Module &module, EventMap &event_map,
-      EventScratchSpace &event_scratch_space, ebpf::IPerfEvent &enter_event,
+      EventScratchSpace &event_scratch_space, ebpf::IEvent &enter_event,
       const ParameterList &parameter_list,
       const ParameterListIndex &param_list_index,
       IBufferStorage &buffer_storage, OptionalPidList excluded_processes,
       const ebpf::ILLVMBridge::Ptr &llvm_bridge);
 
   static SuccessOrStringError
-  generateEventHeader(llvm::IRBuilder<> &builder, ebpf::IPerfEvent &enter_event,
+  generateEventHeader(llvm::IRBuilder<> &builder, ebpf::IEvent &enter_event,
                       ebpf::BPFSyscallInterface &bpf_syscall_interface,
                       llvm::Value *event_object,
                       const StackAllocationList &allocation_list,
                       const ebpf::ILLVMBridge::Ptr &llvm_bridge);
 
-  static SuccessOrStringError generateEnterEventData(
-      llvm::IRBuilder<> &builder, ebpf::IPerfEvent &enter_event,
-      ebpf::BPFSyscallInterface &bpf_syscall_interface,
-      llvm::Value *event_object, const ParameterList &parameter_list,
-      const ParameterListIndex &param_list_index,
-      IBufferStorage &buffer_storage,
-      const StackAllocationList &allocation_list,
-      const VariableList &variable_list);
+  static SuccessOrStringError
+  generateEnterEventData(llvm::IRBuilder<> &builder, ebpf::IEvent &enter_event,
+                         ebpf::BPFSyscallInterface &bpf_syscall_interface,
+                         llvm::Value *event_object,
+                         const ParameterList &parameter_list,
+                         const ParameterListIndex &param_list_index,
+                         IBufferStorage &buffer_storage,
+                         const StackAllocationList &allocation_list,
+                         const VariableList &variable_list);
 
   static SuccessOrStringError createExitFunction(
-      llvm::Module &module, EventMap &event_map, ebpf::IPerfEvent &exit_event,
+      llvm::Module &module, EventMap &event_map, ebpf::IEvent &exit_event,
       const ParameterList &parameter_list,
       const ParameterListIndex &param_list_index,
       IBufferStorage &buffer_storage, ebpf::PerfEventArray &perf_event_array,

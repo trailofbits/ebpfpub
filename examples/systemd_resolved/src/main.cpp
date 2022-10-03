@@ -15,7 +15,6 @@
 
 #include <tob/ebpf/perfeventarray.h>
 
-#include <netinet/in.h>
 #include <sys/resource.h>
 
 const std::string kSystemdSharedPath{

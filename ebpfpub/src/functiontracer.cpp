@@ -22,8 +22,8 @@
 #include <llvm/IR/Verifier.h>
 
 #include <tob/ebpf/ebpf_utils.h>
+#include <tob/ebpf/ievent.h>
 #include <tob/ebpf/illvmbridge.h>
-#include <tob/ebpf/iperfevent.h>
 #include <tob/ebpf/llvm_utils.h>
 #include <tob/ebpf/tracepointdescriptor.h>
 #include <tob/utils/kernel.h>
@@ -78,8 +78,8 @@ struct FunctionTracer::PrivateData final {
   IBufferStorage &buffer_storage;
   ebpf::PerfEventArray &perf_event_array;
 
-  ebpf::IPerfEvent::Ref enter_event;
-  ebpf::IPerfEvent::Ref exit_event;
+  ebpf::IEvent::Ref enter_event;
+  ebpf::IEvent::Ref exit_event;
 
   EventMap::Ref event_map;
   EventScratchSpace::Ref event_scratch_space;
@@ -120,8 +120,8 @@ FunctionTracer::parseEventData(utils::BufferReader &buffer_reader) const {
 FunctionTracer::FunctionTracer(
     const std::string &name, const ParameterList &parameter_list,
     std::size_t event_map_size, IBufferStorage &buffer_storage,
-    ebpf::PerfEventArray &perf_event_array, ebpf::IPerfEvent::Ref enter_event,
-    ebpf::IPerfEvent::Ref exit_event, OptionalPidList excluded_processes,
+    ebpf::PerfEventArray &perf_event_array, ebpf::IEvent::Ref enter_event,
+    ebpf::IEvent::Ref exit_event, OptionalPidList excluded_processes,
     const btfparse::IBTF::Ptr &btf)
     : d(new PrivateData(buffer_storage, perf_event_array)) {
 
@@ -141,8 +141,7 @@ FunctionTracer::FunctionTracer(
   // use (enter/exit) as they will always be both of the same type (tracepoint,
   // kprobe or uprobe)
 
-  bool is_tracepoint =
-      d->enter_event->type() == ebpf::IPerfEvent::Type::Tracepoint;
+  bool is_tracepoint = d->enter_event->type() == ebpf::IEvent::Type::Tracepoint;
 
   auto param_list_index_exp =
       createParameterListIndex(is_tracepoint, parameter_list);
@@ -967,14 +966,14 @@ FunctionTracer::createEventScratchSpace(llvm::Module &module) {
 }
 
 SuccessOrStringError FunctionTracer::createEnterFunctionArgumentType(
-    llvm::Module &module, ebpf::IPerfEvent &enter_event,
+    llvm::Module &module, ebpf::IEvent &enter_event,
     const ParameterList &parameter_list) {
 
   auto &context = module.getContext();
 
   StringErrorOr<llvm::StructType *> function_param_type_exp;
 
-  if (enter_event.type() == ebpf::IPerfEvent::Type::Tracepoint) {
+  if (enter_event.type() == ebpf::IEvent::Type::Tracepoint) {
     // TODO(alessandro): We could future-proof this by importing
     // the header from a real tracepoint
 
@@ -1070,13 +1069,13 @@ SuccessOrStringError FunctionTracer::createEnterFunctionArgumentType(
 
 SuccessOrStringError
 FunctionTracer::createExitFunctionArgumentType(llvm::Module &module,
-                                               ebpf::IPerfEvent &exit_event) {
+                                               ebpf::IEvent &exit_event) {
 
   auto &context = module.getContext();
 
   StringErrorOr<llvm::StructType *> function_param_type_exp;
 
-  if (exit_event.type() == ebpf::IPerfEvent::Type::Tracepoint) {
+  if (exit_event.type() == ebpf::IEvent::Type::Tracepoint) {
     // TODO(alessandro): We could future-proof this by importing
     // the header from a real tracepoint
     std::vector<llvm::Type *> type_list;
@@ -1183,7 +1182,7 @@ StringErrorOr<llvm::Value *> FunctionTracer::getMapEntry(
 
 SuccessOrStringError FunctionTracer::createEnterFunction(
     llvm::Module &module, EventMap &event_map,
-    EventScratchSpace &event_scratch_space, ebpf::IPerfEvent &enter_event,
+    EventScratchSpace &event_scratch_space, ebpf::IEvent &enter_event,
     const ParameterList &parameter_list,
     const ParameterListIndex &param_list_index, IBufferStorage &buffer_storage,
     OptionalPidList excluded_processes,
@@ -1231,7 +1230,7 @@ SuccessOrStringError FunctionTracer::createEnterFunction(
   // Allocate the required stack space
   StackAllocationList stack_allocation_list;
 
-  if (enter_event.isKprobeSyscall() && enter_event.useKprobeIndirectPtRegs()) {
+  if (enter_event.isSyscallKprobe() && enter_event.usesKprobeIndirectPtRegs()) {
     auto args_type = getTypeByName(module, kEnterFunctionParameterTypeName);
 
     auto success_exp = allocateStackSpace(stack_allocation_list, "pt_regs",
@@ -1370,7 +1369,7 @@ SuccessOrStringError FunctionTracer::createEnterFunction(
 }
 
 SuccessOrStringError FunctionTracer::generateEventHeader(
-    llvm::IRBuilder<> &builder, ebpf::IPerfEvent &enter_event,
+    llvm::IRBuilder<> &builder, ebpf::IEvent &enter_event,
     ebpf::BPFSyscallInterface &bpf_syscall_interface, llvm::Value *event_object,
     const StackAllocationList &allocation_list,
     const ebpf::ILLVMBridge::Ptr &llvm_bridge) {
@@ -1545,7 +1544,7 @@ SuccessOrStringError FunctionTracer::generateEventHeader(
 }
 
 SuccessOrStringError FunctionTracer::generateEnterEventData(
-    llvm::IRBuilder<> &builder, ebpf::IPerfEvent &enter_event,
+    llvm::IRBuilder<> &builder, ebpf::IEvent &enter_event,
     ebpf::BPFSyscallInterface &bpf_syscall_interface, llvm::Value *event_object,
     const ParameterList &valid_param_list,
     const ParameterListIndex &param_list_index, IBufferStorage &buffer_storage,
@@ -1566,7 +1565,7 @@ SuccessOrStringError FunctionTracer::generateEnterEventData(
 
   llvm::Value *args_data = current_function->arg_begin();
 
-  if (enter_event.isKprobeSyscall() && enter_event.useKprobeIndirectPtRegs()) {
+  if (enter_event.isSyscallKprobe() && enter_event.usesKprobeIndirectPtRegs()) {
     // The real pt_regs is pointed to by the first argument
     auto first_arg_index_exp = translateParameterNumberToPtregsIndex(0);
     if (!first_arg_index_exp.succeeded()) {
@@ -1628,8 +1627,8 @@ SuccessOrStringError FunctionTracer::generateEnterEventData(
     // We have to map the parameter index (1 to 6) to the right register
     // according to the ABI, and then get the right field from the pt_regs
     // structure
-    if (enter_event.type() == ebpf::IPerfEvent::Type::Kprobe ||
-        enter_event.type() == ebpf::IPerfEvent::Type::Uprobe) {
+    if (enter_event.type() == ebpf::IEvent::Type::Kprobe ||
+        enter_event.type() == ebpf::IEvent::Type::Uprobe) {
 
       auto args_index_exp = translateParameterNumberToPtregsIndex(args_index);
 
@@ -1779,7 +1778,7 @@ SuccessOrStringError FunctionTracer::generateEnterEventData(
 }
 
 SuccessOrStringError FunctionTracer::createExitFunction(
-    llvm::Module &module, EventMap &event_map, ebpf::IPerfEvent &exit_event,
+    llvm::Module &module, EventMap &event_map, ebpf::IEvent &exit_event,
     const ParameterList &parameter_list,
     const ParameterListIndex &param_list_index, IBufferStorage &buffer_storage,
     ebpf::PerfEventArray &perf_event_array, bool skip_exit_code) {
@@ -1890,7 +1889,7 @@ SuccessOrStringError FunctionTracer::createExitFunction(
 
     llvm::Value *function_exit_code_value{nullptr};
 
-    if (exit_event.type() == ebpf::IPerfEvent::Type::Tracepoint) {
+    if (exit_event.type() == ebpf::IEvent::Type::Tracepoint) {
       // Skip the tracepoint header and get the 'ret' parameter
       auto function_exit_code = builder.CreateGEP(
           exit_function_args, {builder.getInt32(0), builder.getInt32(5)});

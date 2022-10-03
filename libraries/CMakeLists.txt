@@ -6,14 +6,10 @@
 # the LICENSE file found in the root directory of this source tree.
 #
 
-cmake_minimum_required(VERSION 3.14.6)
-
-function(ebpfpubLibraries)
-  if (TARGET "ebpf" AND TARGET "utils" AND TARGET "error")
-    return()
-  endif()
-
+if(NOT TARGET "ebpf" AND NOT TARGET "utils" AND NOT TARGET "error")
   add_subdirectory("ebpf-common")
-endfunction()
+endif()
 
-ebpfpubLibraries()
+if(EBPFPUB_ENABLE_TESTS)
+  add_subdirectory("doctest")
+endif()
