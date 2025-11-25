@@ -84,7 +84,7 @@ jobs:
             ${{ env.TOOLCHAIN_PATH }}
 
       - name: Clone the ebpfpub source code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v6
         with:
           repository: trailofbits/ebpfpub
           path: ebpfpub
