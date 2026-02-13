@@ -38,14 +38,14 @@ jobs:
           echo "TOOLCHAIN_PATH=${{ github.workspace }}/osquery-toolchain-${{ inputs.osquery_toolchain_version }}" >> $GITHUB_ENV
 
       - name: Update the ccache cache
-        uses: actions/cache@v3
+        uses: actions/cache@v5
         with:
           path: ${{ env.CCACHE_DIR }}
           key: ccache_${{ env.CACHE_KEY }}-${{ github.sha }}
           restore-keys: ccache_${{ env.CACHE_KEY }}
 
       - name: Update the downloads cache
-        uses: actions/cache@v3
+        uses: actions/cache@v5
         with:
           path: ${{ env.DOWNLOADS_PATH }}
           key: downloads_${{ env.CACHE_KEY }}-${{ github.sha }}
